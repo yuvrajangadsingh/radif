@@ -305,6 +305,14 @@ function spell(a: Akshara[], s: Script): string {
     if (end && s.schwaDeletion && !(nasalEnd && vowel === "aa")) {
       vowel = { aa: "a", ee: "i", oo: "u" }[vowel] ?? vowel;
     }
+    // A bare e after a short vowel is said with a y glide (liye, gaye, huye);
+    // after a long one it stays as written (jaae).
+    const glide =
+      s.schwaDeletion &&
+      !x.consonant &&
+      x.vowel === "e" &&
+      /^[iua]$/.test(a[i - 1]?.vowel ?? "");
+    if (glide) out += "y";
     out += (x.doubled ? x.consonant[0] : "") + x.consonant + vowel;
     if (!x.nasal) return;
     // A one-letter maa: the m already carries the nasal. Longer words keep

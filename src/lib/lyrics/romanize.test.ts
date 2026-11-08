@@ -155,6 +155,21 @@ describe("romanize", () => {
     expect(romanize("ਜਾਨਾਂ")).toBe("jaanaan");
   });
 
+  it("puts a y glide between a short vowel and e (N3)", () => {
+    expect(romanize("लिए")).toBe("liye");
+    expect(romanize("दिए")).toBe("diye");
+    expect(romanize("किए")).toBe("kiye");
+    expect(romanize("गए")).toBe("gaye");
+    expect(romanize("नए")).toBe("naye");
+    expect(romanize("हुए")).toBe("huye");
+    expect(romanize("मेरे लिए हो तुम")).toBe("mere liye ho tum");
+    expect(romanize("प्यार")).toBe("pyaar");
+    expect(romanize("यार")).toBe("yaar");
+    expect(romanize("जाए")).toBe("jaae");
+    expect(romanize("गई")).toBe("gai");
+    expect(romanize("कोई")).toBe("koi");
+  });
+
   it("keeps other text in a mixed line", () => {
     expect(romanize("Baby तू (ooh), 2 बार")).toBe("Baby tu (ooh), 2 baar");
   });
