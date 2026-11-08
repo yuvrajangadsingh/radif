@@ -55,6 +55,48 @@ export type WhatsNewEntry = {
  */
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    version: "0.7.0",
+    date: "November 10, 2026",
+    summary: "Lyrics in Latin letters, even volume, and a better queue",
+    changes: [
+      {
+        type: "new",
+        title: "Lyrics in Latin letters",
+        text: "Hindi, Punjabi and Tamil lyrics can show a Latin spelling under each line, worked out on your Mac. Turn it on in the lyrics source menu, Show Latin spelling.",
+      },
+      {
+        type: "new",
+        title: "Normalize volume",
+        text: "Loud tracks play quieter so songs sit at a similar level, using YouTube's own loudness measurement. Off by default; turn it on in Settings, General. It needs a signed-in account.",
+      },
+      {
+        type: "new",
+        title: "Play next from the queue",
+        text: "Hover a row in Up next or History and press Play next to move it right after the current song. You can also drag a song below the last row now.",
+      },
+      {
+        type: "improved",
+        title: "Play and Shuffle follow the playlist filter",
+        text: "With a filter on, Play and Shuffle use only the tracks that match, and both are disabled when nothing matches.",
+      },
+      {
+        type: "improved",
+        title: "Genius removed",
+        text: "It had been refusing every request, so the app no longer asks it. Lyrics come from YouTube Music and LRCLIB. The lyrics source menu also says which choices apply to every song and which to this song only.",
+      },
+      {
+        type: "fixed",
+        title: "Playback",
+        text: "Removing or moving a song above the one playing no longer restarts it. Start radio on the song already playing no longer gets stuck on a spinner. A replayed song no longer stops on its last second.",
+      },
+      {
+        type: "fixed",
+        title: "Small windows",
+        text: "At the smallest window size, lyrics no longer draw over the player controls.",
+      },
+    ],
+  },
+  {
     version: "0.6.0",
     date: "November 7, 2026",
     summary:
