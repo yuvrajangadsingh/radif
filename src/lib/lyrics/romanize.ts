@@ -301,8 +301,11 @@ function spell(a: Akshara[], s: Script): string {
       out += (x.doubled ? x.consonant[0] : "") + x.consonant + "ein";
       return;
     }
-    // A final long aa keeps its length when nasal (maa, haan, not man).
-    if (end && s.schwaDeletion && !(nasalEnd && vowel === "aa")) {
+    // A final long aa keeps its length when nasal (maa, haan, not man), and so
+    // does a Hindi oo (hoon, yoon). Punjabi types its nasal u short (saanu).
+    const keepsLength =
+      nasalEnd && (vowel === "aa" || (vowel === "oo" && s === DEVANAGARI));
+    if (end && s.schwaDeletion && !keepsLength) {
       vowel = { aa: "a", ee: "i", oo: "u" }[vowel] ?? vowel;
     }
     // A bare e after a short vowel is said with a y glide (liye, gaye, huye);

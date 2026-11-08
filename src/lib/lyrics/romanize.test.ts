@@ -155,6 +155,15 @@ describe("romanize", () => {
     expect(romanize("ਜਾਨਾਂ")).toBe("jaanaan");
   });
 
+  it("keeps a final nasal oo long in Hindi, short in Punjabi (N3)", () => {
+    expect(romanize("हूँ")).toBe("hoon");
+    expect(romanize("यूँ")).toBe("yoon");
+    expect(romanize("क्यूँ")).toBe("kyoon");
+    expect(romanize("तुमको मैं जीता हूँ")).toBe("tumko main jeeta hoon");
+    expect(romanize("तू")).toBe("tu");
+    expect(romanize("ਸਾਨੂੰ")).toBe("saanu");
+  });
+
   it("puts a y glide between a short vowel and e (N3)", () => {
     expect(romanize("लिए")).toBe("liye");
     expect(romanize("दिए")).toBe("diye");
