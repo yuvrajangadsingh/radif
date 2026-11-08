@@ -18,7 +18,7 @@ report in the M5's gitignored `.notes/qa-2026-11-09-r5.md`).
   song resumes where it paused; anywhere else Start radio restarts it (#136
   keeps a moved song only while it plays, because an end guard's last
   timeupdate can leave a stale position). Pick one behavior.
-- **The clock after the 3-failure stop.** When three failures in a row stop
+- **The clock after the failure stop.** When repeated failures in a row stop
   playback, the clock shows the previous song's length (0:00 / 4:58 on a
   56:49 track). Seen once.
 - **Lyrics from another song.** These Boots Are Made For Walkin' showed plain
@@ -60,7 +60,7 @@ develop @ 81c9fe7, report in the M5's gitignored `.notes/qa-2026-11-07.md`).
 - **Shuffle on after Play next reshuffles the tail.** `setShuffle` shuffles
   everything after the current track, so a song placed next loses its place.
   A fix would keep the next slot out of the shuffle.
-- **Cover and controls overflow at the minimum height** (found by Codex on the
+- **Cover and controls overflow at the minimum height** (found in review of the
   L6 fix). At 600 pt with a 420 pt right panel the cover, title and transport
   controls need more height than the panel has. Lyrics no longer draw over the
   bottom row; the cover sizing is what's left.
