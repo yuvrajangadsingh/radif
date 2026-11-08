@@ -9,6 +9,23 @@ time; they are quoted, not rounded up.
 
 ---
 
+## 2026-11-09 · QA findings left for 0.8 (round 5)
+
+**Decided:** not in 0.7.0 (the M4's call on QA round 5, which said ship;
+report in the M5's gitignored `.notes/qa-2026-11-09-r5.md`).
+
+- **A paused song and Start radio (round 5 N1).** At queue index 0 a paused
+  song resumes where it paused; anywhere else Start radio restarts it (#136
+  keeps a moved song only while it plays, because an end guard's last
+  timeupdate can leave a stale position). Pick one behavior.
+- **The clock after the 3-failure stop.** When three failures in a row stop
+  playback, the clock shows the previous song's length (0:00 / 4:58 on a
+  56:49 track). Seen once.
+- **Lyrics from another song.** These Boots Are Made For Walkin' showed plain
+  lyrics from a different song. Lyric matching, not the 0.7 changes.
+
+---
+
 ## 2026-11-07 · QA findings left for 0.8 (rounds 2 and 3)
 
 **Decided:** not in 0.7.0 (the M4's calls on QA rounds 2 and 3, reports in
@@ -17,10 +34,10 @@ the M5's gitignored `.notes/qa-2026-11-07-r2.md` and `-r3.md`). Round 2's
 not listed.
 
 - **Long vowels spelled as written, not as typed (QA N3).** ਕਾਲੀਆਂ ਗੱਡੀਆਂ
-  comes out kaaleeaan gaddeeaan where people type kaaliyan gaddiyan, and हूँ
-  comes out hu (typed hoon or hun). Romanization keeps medial long vowels
-  long on purpose (naal, pyaar); the vowel-plus-aan endings and हूँ need their
-  own rules.
+  comes out kaaleeaan gaddeeaan where people type kaaliyan gaddiyan.
+  Romanization keeps medial long vowels long on purpose (naal, pyaar); the
+  vowel-plus-aan endings need their own rule. हूँ (now hoon) and लिए (now
+  liye) were fixed in #135.
 - **Rule-based spellings that aren't how people type them (QA round 3 N2).**
   Sanskrit loans in Tamil (மோகன்லால் moganlaal for Mohanlal, தீபம் theebam,
   பக்தி pakthi), English in Tamil script (டாக்டர் taaktar, பஸ் pas), a
