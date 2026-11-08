@@ -242,6 +242,10 @@ describe("landing on the slot already playing", () => {
     setup({ ...playing, queue: [track("a"), track("b")] });
     usePlaybackStore.getState().goTo(0);
     kept();
+    // Paused too: the engine sees the same slot and wouldn't reload it.
+    setup({ ...playing, queue: [track("a"), track("b")], playing: false });
+    usePlaybackStore.getState().goTo(0);
+    kept();
   });
 
   it("keeps playing when Start radio replaces the queue around it", () => {
@@ -255,6 +259,21 @@ describe("landing on the slot already playing", () => {
     kept();
   });
 
+  it("keeps playing when Start radio moves it from later in the queue (QA r4 N1)", () => {
+    setup({
+      ...playing,
+      queue: [track("x"), track("y"), track("a")],
+      index: 2,
+    });
+    usePlaybackStore
+      .getState()
+      .playNow({ kind: "song", id: "a", title: "a", thumbnails: [] }, [
+        track("b"),
+      ]);
+    expect(usePlaybackStore.getState().index).toBe(0);
+    kept();
+  });
+
   it("still reloads for another song or another slot of the same song", () => {
     setup(playing);
     usePlaybackStore.getState().setQueue([track("b")], 0);
@@ -262,6 +281,45 @@ describe("landing on the slot already playing", () => {
     setup({ ...playing, queue: [track("a"), track("a")] });
     usePlaybackStore.getState().goTo(1);
     expect(usePlaybackStore.getState().status).toBe("loading");
+    expect(usePlaybackStore.getState().streamUrl).toBeUndefined();
+  });
+
+  it("reloads for a queue with two copies, a failed song and a finished one", () => {
+    const radio = () =>
+      usePlaybackStore
+        .getState()
+        .playNow({ kind: "song", id: "a", title: "a", thumbnails: [] }, [
+          track("b"),
+        ]);
+    // Play on the second a of [a, b, a] while the first plays.
+    setup({ ...playing, queue: [track("a"), track("b"), track("a")] });
+    usePlaybackStore
+      .getState()
+      .setQueue([track("a"), track("b"), track("a")], 2);
+    expect(usePlaybackStore.getState().streamUrl).toBeUndefined();
+    // The same after a row above was removed: [x, a, b, a] at 3, playing at 0.
+    setup({ ...playing, queue: [track("a"), track("b"), track("a")] });
+    usePlaybackStore
+      .getState()
+      .setQueue([track("x"), track("a"), track("b"), track("a")], 3);
+    expect(usePlaybackStore.getState().streamUrl).toBeUndefined();
+    setup({
+      ...playing,
+      queue: [track("x"), track("a")],
+      index: 1,
+      status: "error",
+    });
+    radio();
+    expect(usePlaybackStore.getState().streamUrl).toBeUndefined();
+    // The end of the queue: next() stops, and a late timeupdate can still
+    // write the old position.
+    setup({
+      ...playing,
+      queue: [track("x"), track("a")],
+      index: 1,
+    });
+    usePlaybackStore.setState({ playing: false });
+    radio();
     expect(usePlaybackStore.getState().streamUrl).toBeUndefined();
   });
 });

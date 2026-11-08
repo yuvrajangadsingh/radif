@@ -252,13 +252,27 @@ export function createThrottledStorage(delay = 1000): StateStorage {
  *  a new video or slot; the same song staying in the same slot (Start radio on
  *  what's playing, clicking its card) loads nothing, so resetting here
  *  left a spinner and a 0:00 duration that nothing ever cleared. It just keeps
- *  playing. */
+ *  playing. Start radio also moves a song from later in the queue to the
+ *  front: a new queue holding it once keeps it too, while it plays. A paused
+ *  or finished one loads from the start there (an end guard's last
+ *  timeupdate can leave a stale position), as does a queue with two copies. */
 function slotChange(
   s: PlaybackState,
   queue: QueueTrack[],
   i: number,
 ): Partial<PlaybackState> {
-  if (s.index === i && s.queue[i]?.videoId === queue[i].videoId) return {};
+  const current = s.queue[s.index]?.videoId;
+  if (current !== queue[i].videoId) return reset(queue, i);
+  if (s.index === i) return {};
+  const moved =
+    queue !== s.queue &&
+    s.playing &&
+    s.status !== "error" &&
+    queue.filter((t) => t.videoId === current).length === 1;
+  return moved ? {} : reset(queue, i);
+}
+
+function reset(queue: QueueTrack[], i: number): Partial<PlaybackState> {
   return {
     status: "loading",
     streamUrl: undefined,
