@@ -155,6 +155,31 @@ describe("romanize", () => {
     expect(romanize("ਜਾਨਾਂ")).toBe("jaanaan");
   });
 
+  it("keeps a final nasal oo long in Devanagari, short in Gurmukhi (N3)", () => {
+    expect(romanize("हूँ")).toBe("hoon");
+    expect(romanize("यूँ")).toBe("yoon");
+    expect(romanize("क्यूँ")).toBe("kyoon");
+    expect(romanize("तुमको मैं जीता हूँ")).toBe("tumko main jeeta hoon");
+    expect(romanize("तू")).toBe("tu");
+    expect(romanize("ਸਾਨੂੰ")).toBe("saanu");
+  });
+
+  it("puts a y glide between a short vowel and e (N3)", () => {
+    expect(romanize("लिए")).toBe("liye");
+    expect(romanize("दिए")).toBe("diye");
+    expect(romanize("किए")).toBe("kiye");
+    expect(romanize("गए")).toBe("gaye");
+    expect(romanize("नए")).toBe("naye");
+    expect(romanize("हुए")).toBe("huye");
+    expect(romanize("धुएँ")).toBe("dhuyein");
+    expect(romanize("मेरे लिए हो तुम")).toBe("mere liye ho tum");
+    expect(romanize("प्यार")).toBe("pyaar");
+    expect(romanize("यार")).toBe("yaar");
+    expect(romanize("जाए")).toBe("jaae");
+    expect(romanize("गई")).toBe("gai");
+    expect(romanize("कोई")).toBe("koi");
+  });
+
   it("keeps other text in a mixed line", () => {
     expect(romanize("Baby तू (ooh), 2 बार")).toBe("Baby tu (ooh), 2 baar");
   });
