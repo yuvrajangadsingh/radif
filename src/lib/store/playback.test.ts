@@ -242,6 +242,10 @@ describe("landing on the slot already playing", () => {
     setup({ ...playing, queue: [track("a"), track("b")] });
     usePlaybackStore.getState().goTo(0);
     kept();
+    // Paused too: the engine sees the same slot and wouldn't reload it.
+    setup({ ...playing, queue: [track("a"), track("b")], playing: false });
+    usePlaybackStore.getState().goTo(0);
+    kept();
   });
 
   it("keeps playing when Start radio replaces the queue around it", () => {

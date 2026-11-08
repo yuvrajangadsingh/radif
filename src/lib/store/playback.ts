@@ -248,25 +248,31 @@ export function createThrottledStorage(delay = 1000): StateStorage {
   };
 }
 
-/** The reset for landing on slot `i` of `queue`. A new queue that lands on
- *  the song already playing (Start radio on it, clicking its card) keeps it
- *  playing, wherever it sat in the old queue; resetting left a spinner and a
- *  0:00 duration, or restarted it. A queue holding the song more than once,
- *  goTo onto a duplicate, a failed song and a paused or finished one (an end
- *  guard's last timeupdate can leave a stale position) all load from the
- *  start. */
+/** The reset for landing on slot `i` of `queue`. The audio engine reloads on
+ *  a new video or slot; the same song staying in the same slot (Start radio on
+ *  what's playing, clicking its card) loads nothing, so resetting here
+ *  left a spinner and a 0:00 duration that nothing ever cleared. It just keeps
+ *  playing. Start radio also moves a song from later in the queue to the
+ *  front: a new queue holding it once keeps it too, while it plays. A paused
+ *  or finished one loads from the start there (an end guard's last
+ *  timeupdate can leave a stale position), as does a queue with two copies. */
 function slotChange(
   s: PlaybackState,
   queue: QueueTrack[],
   i: number,
 ): Partial<PlaybackState> {
   const current = s.queue[s.index]?.videoId;
-  const live = s.playing && s.status !== "error";
-  const kept =
-    queue === s.queue
-      ? s.index === i
-      : queue.filter((t) => t.videoId === current).length === 1;
-  if (live && current === queue[i].videoId && kept) return {};
+  if (current !== queue[i].videoId) return reset(queue, i);
+  if (s.index === i) return {};
+  const moved =
+    queue !== s.queue &&
+    s.playing &&
+    s.status !== "error" &&
+    queue.filter((t) => t.videoId === current).length === 1;
+  return moved ? {} : reset(queue, i);
+}
+
+function reset(queue: QueueTrack[], i: number): Partial<PlaybackState> {
   return {
     status: "loading",
     streamUrl: undefined,
