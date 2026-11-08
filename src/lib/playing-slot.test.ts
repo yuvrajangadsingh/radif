@@ -13,12 +13,13 @@ describe("followSlot", () => {
 
   it("keeps the slot when the queue is rebuilt around the same song", () => {
     expect(followSlot(start, { videoId: "a" }, 3, "a", true).id).toBe(7);
+    // Start radio moves it to the front of a new queue (QA r4 N1).
+    expect(followSlot(start, { videoId: "a" }, 0, "a", true).id).toBe(7);
   });
 
-  it("moves on for another track, or the same song in another slot", () => {
+  it("moves on for another track", () => {
     expect(followSlot(start, b, 4, "b", true).id).toBe(8);
     expect(followSlot(start, b, 3, "b", true).id).toBe(8);
-    expect(followSlot(start, { videoId: "a" }, 4, "a", true).id).toBe(8);
   });
 
   it("moves on when a transition cleared the stream, even for the same entry", () => {

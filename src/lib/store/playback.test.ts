@@ -255,6 +255,21 @@ describe("landing on the slot already playing", () => {
     kept();
   });
 
+  it("keeps playing when Start radio moves it from later in the queue (QA r4 N1)", () => {
+    setup({
+      ...playing,
+      queue: [track("x"), track("y"), track("a")],
+      index: 2,
+    });
+    usePlaybackStore
+      .getState()
+      .playNow({ kind: "song", id: "a", title: "a", thumbnails: [] }, [
+        track("b"),
+      ]);
+    expect(usePlaybackStore.getState().index).toBe(0);
+    kept();
+  });
+
   it("still reloads for another song or another slot of the same song", () => {
     setup(playing);
     usePlaybackStore.getState().setQueue([track("b")], 0);

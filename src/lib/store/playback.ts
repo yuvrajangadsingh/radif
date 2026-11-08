@@ -248,17 +248,18 @@ export function createThrottledStorage(delay = 1000): StateStorage {
   };
 }
 
-/** The reset for landing on slot `i` of `queue`. The audio engine reloads on
- *  a new video or slot; the same song staying in the same slot (Start radio on
- *  what's playing, clicking its card) loads nothing, so resetting here
- *  left a spinner and a 0:00 duration that nothing ever cleared. It just keeps
- *  playing. */
+/** The reset for landing on slot `i` of `queue`. A new queue that lands on
+ *  the song already playing (Start radio on it, clicking its card) keeps it
+ *  playing, wherever it sat in the old queue; resetting left a spinner and a
+ *  0:00 duration, or restarted it. Within the same queue only its own slot
+ *  does: goTo onto a duplicate plays that one from the start. */
 function slotChange(
   s: PlaybackState,
   queue: QueueTrack[],
   i: number,
 ): Partial<PlaybackState> {
-  if (s.index === i && s.queue[i]?.videoId === queue[i].videoId) return {};
+  const sameSong = s.queue[s.index]?.videoId === queue[i].videoId;
+  if (sameSong && (queue !== s.queue || s.index === i)) return {};
   return {
     status: "loading",
     streamUrl: undefined,
