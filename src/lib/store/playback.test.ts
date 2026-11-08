@@ -280,7 +280,7 @@ describe("landing on the slot already playing", () => {
     expect(usePlaybackStore.getState().streamUrl).toBeUndefined();
   });
 
-  it("reloads another copy picked from a new queue, a failed song and a finished one", () => {
+  it("reloads for a queue with two copies, a failed song and a finished one", () => {
     const radio = () =>
       usePlaybackStore
         .getState()
@@ -293,6 +293,12 @@ describe("landing on the slot already playing", () => {
       .getState()
       .setQueue([track("a"), track("b"), track("a")], 2);
     expect(usePlaybackStore.getState().streamUrl).toBeUndefined();
+    // The same after a row above was removed: [x, a, b, a] at 3, playing at 0.
+    setup({ ...playing, queue: [track("a"), track("b"), track("a")] });
+    usePlaybackStore
+      .getState()
+      .setQueue([track("x"), track("a"), track("b"), track("a")], 3);
+    expect(usePlaybackStore.getState().streamUrl).toBeUndefined();
     setup({
       ...playing,
       queue: [track("x"), track("a")],
@@ -301,12 +307,12 @@ describe("landing on the slot already playing", () => {
     });
     radio();
     expect(usePlaybackStore.getState().streamUrl).toBeUndefined();
-    // The end of the queue: next() stops at position 0.
+    // The end of the queue: next() stops, and a late timeupdate can still
+    // write the old position.
     setup({
       ...playing,
       queue: [track("x"), track("a")],
       index: 1,
-      position: 0,
     });
     usePlaybackStore.setState({ playing: false });
     radio();

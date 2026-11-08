@@ -251,19 +251,21 @@ export function createThrottledStorage(delay = 1000): StateStorage {
 /** The reset for landing on slot `i` of `queue`. A new queue that lands on
  *  the song already playing (Start radio on it, clicking its card) keeps it
  *  playing, wherever it sat in the old queue; resetting left a spinner and a
- *  0:00 duration, or restarted it. Picking another copy of it (the same song
- *  still at the old index, or goTo onto a duplicate) plays that copy from the
- *  start, and so does a song that failed or already finished. */
+ *  0:00 duration, or restarted it. A queue holding the song more than once,
+ *  goTo onto a duplicate, a failed song and a paused or finished one (an end
+ *  guard's last timeupdate can leave a stale position) all load from the
+ *  start. */
 function slotChange(
   s: PlaybackState,
   queue: QueueTrack[],
   i: number,
 ): Partial<PlaybackState> {
   const current = s.queue[s.index]?.videoId;
-  const live = s.status !== "error" && (s.playing || s.position > 0);
+  const live = s.playing && s.status !== "error";
   const kept =
-    s.index === i ||
-    (queue !== s.queue && queue[s.index]?.videoId !== current);
+    queue === s.queue
+      ? s.index === i
+      : queue.filter((t) => t.videoId === current).length === 1;
   if (live && current === queue[i].videoId && kept) return {};
   return {
     status: "loading",
