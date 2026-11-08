@@ -296,13 +296,25 @@ function spell(a: Akshara[], s: Script): string {
     // meri, tu). Tamil keeps them.
     let vowel = x.vowel;
     const nasalEnd = end && x.nasal && s.schwaDeletion;
+    // A bare e after a short vowel is said with a y glide (liye, gaye, huye);
+    // after a long one it stays as written (jaae).
+    const glide =
+      s.schwaDeletion &&
+      !x.consonant &&
+      x.vowel === "e" &&
+      /^[iua]$/.test(a[i - 1]?.vowel ?? "");
+    if (glide) out += "y";
     if (nasalEnd && vowel === "e") {
       // A final nasal e is written the way it sounds (mein, not men).
       out += (x.doubled ? x.consonant[0] : "") + x.consonant + "ein";
       return;
     }
-    // A final long aa keeps its length when nasal (maa, haan, not man).
-    if (end && s.schwaDeletion && !(nasalEnd && vowel === "aa")) {
+    // A final long aa keeps its length when nasal (maa, haan, not man), and so
+    // does an oo in Devanagari (hoon, yoon). Gurmukhi's nasal u is typed short
+    // (saanu).
+    const keepsLength =
+      nasalEnd && (vowel === "aa" || (vowel === "oo" && s === DEVANAGARI));
+    if (end && s.schwaDeletion && !keepsLength) {
       vowel = { aa: "a", ee: "i", oo: "u" }[vowel] ?? vowel;
     }
     out += (x.doubled ? x.consonant[0] : "") + x.consonant + vowel;
