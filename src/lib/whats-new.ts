@@ -68,12 +68,12 @@ export const WHATS_NEW: WhatsNewEntry[] = [
       {
         type: "new",
         title: "Normalize volume",
-        text: "Loud tracks play quieter so songs sit at a similar level, using YouTube's own loudness measurement. Off by default; turn it on in Settings, General. It needs a signed-in account.",
+        text: "Loud tracks play quieter so songs sit at a similar level, using YouTube's own loudness measurement. It works on this Mac, not while casting. Off by default; turn it on in Settings, General. It needs a signed-in account.",
       },
       {
         type: "new",
         title: "Play next from the queue",
-        text: "Hover a row in Up next or History and press Play next to move it right after the current song. You can also drag a song below the last row now.",
+        text: "Hover a row in Up next and press Play next to move it right after the current song. You can also drag a song below the last row now.",
       },
       {
         type: "improved",
