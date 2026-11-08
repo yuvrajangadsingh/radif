@@ -25,12 +25,10 @@ export function followSlot(
 ): PlayingSlot {
   if (entry === prev.entry && index === prev.index) return prev;
   // The same entry somewhere else (a shift), or a new entry for the same song
-  // in the same slot (a queue rebuilt around it): still the same playback,
-  // unless a transition cleared the stream (repeat-all reshuffling the same
-  // entry to the front, next onto a duplicate that shares the object).
-  const sameSlot =
-    loaded &&
-    (entry === prev.entry ||
-      (index === prev.index && videoId === prev.videoId));
+  // (a queue rebuilt around it, Start radio moving it to the front): still the
+  // same playback, unless a transition cleared the stream (next or goTo onto
+  // a duplicate, repeat-all reshuffling the same entry to the front). The
+  // store's slotChange decides which landings count as a transition.
+  const sameSlot = loaded && (entry === prev.entry || videoId === prev.videoId);
   return { entry, index, videoId, id: sameSlot ? prev.id : prev.id + 1 };
 }
