@@ -296,18 +296,6 @@ function spell(a: Akshara[], s: Script): string {
     // meri, tu). Tamil keeps them.
     let vowel = x.vowel;
     const nasalEnd = end && x.nasal && s.schwaDeletion;
-    if (nasalEnd && vowel === "e") {
-      // A final nasal e is written the way it sounds (mein, not men).
-      out += (x.doubled ? x.consonant[0] : "") + x.consonant + "ein";
-      return;
-    }
-    // A final long aa keeps its length when nasal (maa, haan, not man), and so
-    // does a Hindi oo (hoon, yoon). Punjabi types its nasal u short (saanu).
-    const keepsLength =
-      nasalEnd && (vowel === "aa" || (vowel === "oo" && s === DEVANAGARI));
-    if (end && s.schwaDeletion && !keepsLength) {
-      vowel = { aa: "a", ee: "i", oo: "u" }[vowel] ?? vowel;
-    }
     // A bare e after a short vowel is said with a y glide (liye, gaye, huye);
     // after a long one it stays as written (jaae).
     const glide =
@@ -316,6 +304,19 @@ function spell(a: Akshara[], s: Script): string {
       x.vowel === "e" &&
       /^[iua]$/.test(a[i - 1]?.vowel ?? "");
     if (glide) out += "y";
+    if (nasalEnd && vowel === "e") {
+      // A final nasal e is written the way it sounds (mein, not men).
+      out += (x.doubled ? x.consonant[0] : "") + x.consonant + "ein";
+      return;
+    }
+    // A final long aa keeps its length when nasal (maa, haan, not man), and so
+    // does an oo in Devanagari (hoon, yoon). Gurmukhi's nasal u is typed short
+    // (saanu).
+    const keepsLength =
+      nasalEnd && (vowel === "aa" || (vowel === "oo" && s === DEVANAGARI));
+    if (end && s.schwaDeletion && !keepsLength) {
+      vowel = { aa: "a", ee: "i", oo: "u" }[vowel] ?? vowel;
+    }
     out += (x.doubled ? x.consonant[0] : "") + x.consonant + vowel;
     if (!x.nasal) return;
     // A one-letter maa: the m already carries the nasal. Longer words keep
