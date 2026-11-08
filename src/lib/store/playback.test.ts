@@ -279,4 +279,37 @@ describe("landing on the slot already playing", () => {
     expect(usePlaybackStore.getState().status).toBe("loading");
     expect(usePlaybackStore.getState().streamUrl).toBeUndefined();
   });
+
+  it("reloads another copy picked from a new queue, a failed song and a finished one", () => {
+    const radio = () =>
+      usePlaybackStore
+        .getState()
+        .playNow({ kind: "song", id: "a", title: "a", thumbnails: [] }, [
+          track("b"),
+        ]);
+    // Play on the second a of [a, b, a] while the first plays.
+    setup({ ...playing, queue: [track("a"), track("b"), track("a")] });
+    usePlaybackStore
+      .getState()
+      .setQueue([track("a"), track("b"), track("a")], 2);
+    expect(usePlaybackStore.getState().streamUrl).toBeUndefined();
+    setup({
+      ...playing,
+      queue: [track("x"), track("a")],
+      index: 1,
+      status: "error",
+    });
+    radio();
+    expect(usePlaybackStore.getState().streamUrl).toBeUndefined();
+    // The end of the queue: next() stops at position 0.
+    setup({
+      ...playing,
+      queue: [track("x"), track("a")],
+      index: 1,
+      position: 0,
+    });
+    usePlaybackStore.setState({ playing: false });
+    radio();
+    expect(usePlaybackStore.getState().streamUrl).toBeUndefined();
+  });
 });
