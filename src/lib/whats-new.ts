@@ -58,6 +58,7 @@ export const WHATS_NEW: WhatsNewEntry[] = [
     version: "0.7.0",
     date: "November 10, 2026",
     summary: "Lyrics in Latin letters, even volume, and a better queue",
+    image: "/whats-new/0.7.0.jpg",
     changes: [
       {
         type: "new",
