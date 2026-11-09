@@ -86,6 +86,14 @@ describe("romanize", () => {
     expect(romanize("காஃபி")).toBe("kaafi");
   });
 
+  it("spells Tamil loans from a word list (QA r3 N2)", () => {
+    expect(romanize("மோகன்லால்")).toBe("mohanlal");
+    expect(romanize("தீபம்")).toBe("deepam");
+    expect(romanize("பக்தி")).toBe("bakthi");
+    expect(romanize("டாக்டர் பஸ்")).toBe("doctor bus");
+    expect(romanize("பக்\u200Dதி")).toBe("bakthi");
+  });
+
   it("handles the schwa rule's edges", () => {
     expect(romanize("न")).toBe("na");
     expect(romanize("मित्र")).toBe("mitra");

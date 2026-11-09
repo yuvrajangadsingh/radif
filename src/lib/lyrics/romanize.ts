@@ -224,6 +224,16 @@ function deleteSchwas(a: Akshara[]): void {
   }
 }
 
+/** Loans the voicing rules can't know are loans: Sanskrit (deepam, not
+ *  theebam) and English (doctor, not taaktar). Whole words only. */
+const TAMIL_WORDS: Record<string, string> = {
+  மோகன்லால்: "mohanlal",
+  தீபம்: "deepam",
+  பக்தி: "bakthi",
+  டாக்டர்: "doctor",
+  பஸ்: "bus",
+};
+
 const TAMIL_STOPS: Record<string, [unvoiced: string, voiced: string]> = {
   K: ["k", "g"],
   C: ["s", "j"],
@@ -360,6 +370,9 @@ export function romanize(text: string): string | null {
   const out = line.replace(SCRIPT_RUN, (word) => {
     found = true;
     const s = scriptOf(word);
+    const loan =
+      s === TAMIL && TAMIL_WORDS[word.replace(/[\u200C\u200D]/g, "")];
+    if (loan) return loan;
     const akshara = parse(word, s);
     if (s.schwaDeletion) deleteSchwas(akshara);
     if (s === TAMIL) tamilVoicing(akshara);
