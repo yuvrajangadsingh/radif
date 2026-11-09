@@ -5,7 +5,8 @@ vi.mock("@/lib/player-info", () => ({ playerInfo: vi.fn() }));
 vi.mock("@/lib/store/accounts", () => ({ useAccounts: vi.fn() }));
 vi.mock("@/lib/store/settings", () => ({ useSettingsStore: vi.fn() }));
 
-const { loudnessGain } = await import("./loudness");
+const { loudnessGain, trackGain } = await import("./loudness");
+const { playerInfo } = await import("@/lib/player-info");
 
 describe("loudnessGain", () => {
   // The values YouTube returned on Nov 6 for these tracks.
@@ -26,5 +27,36 @@ describe("loudnessGain", () => {
     expect(loudnessGain(undefined)).toBe(1);
     expect(loudnessGain({})).toBe(1);
     expect(loudnessGain({ loudnessDb: "loud" })).toBe(1);
+  });
+});
+
+describe("trackGain", () => {
+  const loud = { playerConfig: { audioConfig: { loudnessDb: -0.58 } } };
+
+  it("asks once per track and keeps the answer", async () => {
+    const ask = vi.mocked(playerInfo);
+    ask.mockReset().mockResolvedValue(loud as never);
+    const first = await trackGain("kept", "acc", null);
+    expect(first).toBeCloseTo(10 ** (-6.42 / 20), 3);
+    expect(await trackGain("kept", "acc", null)).toBe(first);
+    expect(ask).toHaveBeenCalledTimes(1);
+  });
+
+  it("doesn't keep a response with no loudness", async () => {
+    const ask = vi.mocked(playerInfo);
+    ask.mockReset().mockResolvedValueOnce({} as never);
+    expect(await trackGain("unmeasured", "acc", null)).toBe(1);
+    ask.mockResolvedValue(loud as never);
+    expect(await trackGain("unmeasured", "acc", null)).toBeLessThan(1);
+    expect(ask).toHaveBeenCalledTimes(2);
+  });
+
+  it("doesn't keep a failure", async () => {
+    const ask = vi.mocked(playerInfo);
+    ask.mockReset().mockRejectedValueOnce(new Error("offline"));
+    await expect(trackGain("flaky", "acc", null)).rejects.toThrow("offline");
+    ask.mockResolvedValue(loud as never);
+    expect(await trackGain("flaky", "acc", null)).toBeLessThan(1);
+    expect(ask).toHaveBeenCalledTimes(2);
   });
 });
