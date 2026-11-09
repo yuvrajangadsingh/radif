@@ -458,6 +458,13 @@ describe("shuffle after Play next", () => {
     expect(usePlaybackStore.getState().queue[1].queuedNext).toBeUndefined();
   });
 
+  it("lets a dragged Play next song be shuffled (QA r9 N2)", () => {
+    setup({ queue: "abcdef".split("").map(track), index: 0 });
+    usePlaybackStore.getState().playNextAt(4); // "e" to the top
+    usePlaybackStore.getState().moveTrack(1, 4); // dragged down
+    expect(usePlaybackStore.getState().queue[4].queuedNext).toBeUndefined();
+  });
+
   it("moves an Up next row right after the playing song", () => {
     setup({ queue: [track("a"), track("b"), track("c")], index: 1 });
     usePlaybackStore.getState().playNextAt(0); // history row: ignored
