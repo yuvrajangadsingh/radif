@@ -106,6 +106,14 @@ export type PlaybackState = {
   /** Set once at launch from the saved playhead: the engine's first load
    *  of this track seeks here, and the field is cleared when it does. */
   resumeAt?: { videoId: string; seconds: number };
+  /** What Clear queue removed, for its Undo. Not persisted. */
+  cleared?: {
+    queue: QueueTrack[];
+    index: number;
+    position: number;
+    playing: boolean;
+    queueContinuation?: string;
+  };
 
   /** When true, auto-append radio tracks to the queue when the last one ends. */
   autoRadio: boolean;
@@ -132,6 +140,8 @@ export type PlaybackState = {
   /** Play next on an Up next row: move it right after the current track. */
   playNextAt: (from: number) => void;
   clearQueue: () => void;
+  /** Put back what Clear queue removed, where it was and as it was. */
+  undoClear: () => void;
   setAutoRadio: (on: boolean) => void;
   setQueueContinuation: (token?: string) => void;
 
@@ -498,7 +508,9 @@ const playbackStateCreator: StateCreator<PlaybackState> = (set, get) => ({
   },
 
   clearQueue: () => {
+    const { queue, index, position, playing, queueContinuation } = get();
     set({
+      cleared: { queue, index, position, playing, queueContinuation },
       queue: [],
       index: -1,
       status: "idle",
@@ -507,6 +519,31 @@ const playbackStateCreator: StateCreator<PlaybackState> = (set, get) => ({
       position: 0,
       duration: 0,
       queueContinuation: undefined,
+    });
+  },
+
+  undoClear: () => {
+    const c = get().cleared;
+    if (!c) return;
+    const track = c.queue[c.index];
+    set({
+      cleared: undefined,
+      queue: c.queue,
+      index: c.index,
+      queueContinuation: c.queueContinuation,
+      status: track ? "loading" : "idle",
+      streamUrl: undefined,
+      error: undefined,
+      position: c.position,
+      duration: track?.duration ?? 0,
+      playing: c.playing,
+      // A seek meant for whatever played since the clear.
+      pendingSeek: undefined,
+      // The reload seeks back here, the way a launch resume does.
+      resumeAt:
+        track && c.position > 0
+          ? { videoId: track.videoId, seconds: c.position }
+          : undefined,
     });
   },
 
@@ -791,6 +828,7 @@ export function initFloatingPlaybackBridge(): void {
     moveTrack: (from, to) => sendAction({ type: "moveTrack", from, to }),
     playNextAt: (from) => sendAction({ type: "playNextAt", from }),
     clearQueue: () => sendAction({ type: "clearQueue" }),
+    undoClear: () => sendAction({ type: "undoClear" }),
     appendToQueue: (tracks) =>
       sendAction({ type: "appendToQueue", tracks: tracks as unknown[] }),
     setAutoRadio: (on) => sendAction({ type: "setAutoRadio", on }),
