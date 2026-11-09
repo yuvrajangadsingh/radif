@@ -319,6 +319,27 @@ describe("landing on the slot already playing", () => {
     expect(usePlaybackStore.getState().streamUrl).toBeUndefined();
   });
 
+  it("reloads a failed song when its row or play is clicked (QA r8 N2)", () => {
+    setup({ ...playing, status: "error", playing: false });
+    const before = usePlaybackStore.getState().reloads;
+    usePlaybackStore.getState().toggle();
+    const s = usePlaybackStore.getState();
+    expect(s.status).toBe("loading");
+    expect(s.streamUrl).toBeUndefined();
+    expect(s.playing).toBe(true);
+    expect(s.reloads).toBe(before + 1);
+    // A failed one that still wants to play pauses (the sleep timer).
+    setup({ ...playing, status: "error" });
+    usePlaybackStore.getState().toggle();
+    expect(usePlaybackStore.getState().playing).toBe(false);
+    expect(usePlaybackStore.getState().reloads).toBe(before + 1);
+    // A healthy one just pauses.
+    setup(playing);
+    usePlaybackStore.getState().toggle();
+    expect(usePlaybackStore.getState().playing).toBe(false);
+    expect(usePlaybackStore.getState().streamUrl).toBe("blob:a");
+  });
+
   it("reloads a failed song on its own slot", () => {
     setup({ ...playing, queue: [track("a"), track("b")], status: "error" });
     const before = usePlaybackStore.getState().reloads;

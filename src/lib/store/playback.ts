@@ -495,6 +495,15 @@ const playbackStateCreator: StateCreator<PlaybackState> = (set, get) => ({
     // happening, so drive it and let its next status set `playing` here.
     // Setting it locally too would race the status back and forth.
     if (castCommand(playing ? "cast_pause" : "cast_play")) return;
+    // Play on a failed, stopped song (its row, the play button) tries it
+    // again, the way landing on its slot does. One that still wants to play
+    // (the stall watchdog's give-up) pauses as before: the sleep timer
+    // pauses through here.
+    const { index, status } = get();
+    if (status === "error" && !playing && index >= 0) {
+      set({ ...slotChange(get(), queue, index), playing: true });
+      return;
+    }
     set({ playing: !playing });
   },
 
