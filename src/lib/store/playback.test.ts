@@ -87,6 +87,7 @@ describe("playback next()", () => {
     expect(s.index).toBe(1);
     expect(s.playing).toBe(false);
     expect(s.position).toBe(0);
+    expect(s.pendingSeek).toBe(0);
   });
 
   it("counts a queue end so the engine can tell it from a pause", () => {
@@ -274,6 +275,40 @@ describe("landing on the slot already playing", () => {
     kept();
   });
 
+  it("keeps a paused song where it paused when Start radio moves it (QA r5 N1)", () => {
+    setup({
+      ...playing,
+      queue: [track("x"), track("y"), track("a")],
+      index: 2,
+      playing: false,
+    });
+    usePlaybackStore
+      .getState()
+      .playNow({ kind: "song", id: "a", title: "a", thumbnails: [] }, [
+        track("b"),
+      ]);
+    expect(usePlaybackStore.getState().index).toBe(0);
+    expect(usePlaybackStore.getState().pendingSeek).toBeUndefined();
+    kept();
+  });
+
+  it("starts a finished song over when Start radio moves it", () => {
+    setup({ ...playing, queue: [track("x"), track("a")], index: 1 });
+    usePlaybackStore.getState().next();
+    expect(usePlaybackStore.getState().pendingSeek).toBe(0);
+    // The engine rewinds the paused element and consumes the seek.
+    usePlaybackStore.getState().clearPendingSeek();
+    usePlaybackStore
+      .getState()
+      .playNow({ kind: "song", id: "a", title: "a", thumbnails: [] }, [
+        track("b"),
+      ]);
+    const s = usePlaybackStore.getState();
+    expect(s.streamUrl).toBe("blob:a");
+    expect(s.position).toBe(0);
+    expect(s.playing).toBe(true);
+  });
+
   it("still reloads for another song or another slot of the same song", () => {
     setup(playing);
     usePlaybackStore.getState().setQueue([track("b")], 0);
@@ -284,7 +319,7 @@ describe("landing on the slot already playing", () => {
     expect(usePlaybackStore.getState().streamUrl).toBeUndefined();
   });
 
-  it("reloads for a queue with two copies, a failed song and a finished one", () => {
+  it("reloads for two copies, a failed song and a paused load", () => {
     const radio = () =>
       usePlaybackStore
         .getState()
@@ -311,14 +346,14 @@ describe("landing on the slot already playing", () => {
     });
     radio();
     expect(usePlaybackStore.getState().streamUrl).toBeUndefined();
-    // The end of the queue: next() stops, and a late timeupdate can still
-    // write the old position.
+    // Paused while its stream was still loading.
     setup({
       ...playing,
       queue: [track("x"), track("a")],
       index: 1,
+      status: "loading",
+      playing: false,
     });
-    usePlaybackStore.setState({ playing: false });
     radio();
     expect(usePlaybackStore.getState().streamUrl).toBeUndefined();
   });
