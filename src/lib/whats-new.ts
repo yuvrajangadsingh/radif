@@ -55,6 +55,48 @@ export type WhatsNewEntry = {
  */
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    version: "0.8.0",
+    date: "November 12, 2026",
+    summary: "A steadier queue, playback and Latin lyrics",
+    changes: [
+      {
+        type: "improved",
+        title: "Shuffle keeps your Play next songs",
+        text: "Turning shuffle on leaves the songs you put next at the top, in their order, and shuffles the rest. Dragging one down lets it be shuffled like any other.",
+      },
+      {
+        type: "improved",
+        title: "Undo after Clear queue",
+        text: "Undo now puts the queue back as it was: the same order, the same song at the same spot, paused or playing, when playing on this Mac.",
+      },
+      {
+        type: "improved",
+        title: "Normalize volume starts on time",
+        text: "With Normalize volume on, the next song's loudness is read while the current one plays, so it usually starts at its own level instead of the previous song's.",
+      },
+      {
+        type: "improved",
+        title: "Latin lyrics read more like people type them",
+        text: "Better spellings for Punjabi endings (kaaliyan), Hindi words like hoon and karoon, a lone aa, and Tamil plurals, doubled letters and common loanwords.",
+      },
+      {
+        type: "fixed",
+        title: "Playback",
+        text: "Start radio on a paused song keeps its place. Clicking a song that failed, or pressing Play on it, tries it again. After several failed songs the clock no longer shows the previous song's length. Pressing Play after the queue ends starts the last song over, and switching between a song and its video no longer skips it early.",
+      },
+      {
+        type: "fixed",
+        title: "Lyrics from another song",
+        text: "When YouTube Music's plain lyrics for a video look like another song's, the automatic pick shows LRCLIB's instead if it has any.",
+      },
+      {
+        type: "fixed",
+        title: "Small windows",
+        text: "At the smallest window height the cover shrinks so the title and controls stay in view.",
+      },
+    ],
+  },
+  {
     version: "0.7.0",
     date: "November 10, 2026",
     summary: "Lyrics in Latin letters, even volume, and a better queue",
