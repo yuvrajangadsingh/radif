@@ -378,3 +378,77 @@ describe("landing on the slot already playing", () => {
     expect(usePlaybackStore.getState().streamUrl).toBeUndefined();
   });
 });
+
+describe("shuffle after Play next", () => {
+  beforeEach(() => setup({}));
+
+  it("keeps Play next songs at the top and shuffles the rest", () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const rest = "cdefghijkl".split("").map(track);
+    setup({ queue: [track("a"), track("b"), ...rest], index: 0 });
+    const s = usePlaybackStore.getState();
+    s.enqueueNext(track("x"));
+    s.playNextAt(5); // "e", from Up next
+    s.setShuffle(true);
+    const q = usePlaybackStore.getState().queue.map((t) => t.videoId);
+    expect(q.slice(0, 3)).toEqual(["a", "e", "x"]);
+    // Math.random 0 makes Fisher-Yates a fixed rotation of the rest.
+    expect(q.slice(3)).toEqual("cdfghijklb".split(""));
+    expect(usePlaybackStore.getState().index).toBe(0);
+    vi.restoreAllMocks();
+  });
+
+  it("keeps them at the top when a queue is set with shuffle on (Undo)", () => {
+    const queue = [track("a"), { ...track("x"), queuedNext: true }];
+    queue.push(..."bcdefgh".split("").map(track));
+    setup({ shuffle: true });
+    usePlaybackStore.getState().setQueue(queue, 0);
+    const q = usePlaybackStore.getState().queue.map((t) => t.videoId);
+    expect(q.slice(0, 2)).toEqual(["a", "x"]);
+  });
+
+  it("uses up the place when a removed row or a new queue makes it current", () => {
+    setup({ queue: [track("a"), track("b")], index: 0 });
+    usePlaybackStore.getState().enqueueNext(track("x"));
+    usePlaybackStore.getState().removeAt(0);
+    expect(usePlaybackStore.getState().queue[0].queuedNext).toBeUndefined();
+    setup({});
+    usePlaybackStore
+      .getState()
+      .setQueue([{ ...track("y"), queuedNext: true }, track("z")], 0);
+    expect(usePlaybackStore.getState().queue[0].queuedNext).toBeUndefined();
+  });
+
+  it("uses up a song's place once it's reached", () => {
+    setup({ queue: [track("a"), track("b"), track("c")], index: 0 });
+    usePlaybackStore.getState().enqueueNext(track("x"));
+    usePlaybackStore.getState().next();
+    expect(usePlaybackStore.getState().queue[1].queuedNext).toBeUndefined();
+    usePlaybackStore.getState().playNextAt(3);
+    usePlaybackStore.getState().goTo(2);
+    expect(usePlaybackStore.getState().queue[2].queuedNext).toBeUndefined();
+    // Skipped past, then reached with Previous.
+    setup({ queue: [track("a"), track("b")], index: 0, position: 0 });
+    usePlaybackStore.getState().enqueueNext(track("x"));
+    usePlaybackStore.getState().goTo(2);
+    usePlaybackStore.setState({ position: 0 });
+    usePlaybackStore.getState().prev();
+    expect(usePlaybackStore.getState().index).toBe(1);
+    expect(usePlaybackStore.getState().queue[1].queuedNext).toBeUndefined();
+  });
+
+  it("moves an Up next row right after the playing song", () => {
+    setup({ queue: [track("a"), track("b"), track("c")], index: 1 });
+    usePlaybackStore.getState().playNextAt(0); // history row: ignored
+    usePlaybackStore.getState().playNextAt(1); // the playing one: ignored
+    expect(usePlaybackStore.getState().queue.map((t) => t.videoId)).toEqual([
+      "a",
+      "b",
+      "c",
+    ]);
+    usePlaybackStore.getState().playNextAt(2);
+    const s = usePlaybackStore.getState();
+    expect(s.queue[2].queuedNext).toBe(true);
+    expect(s.index).toBe(1);
+  });
+});

@@ -49,6 +49,8 @@ export type QueueTrack = {
    * other version rather than a fuzzy search.
    */
   counterpartId?: string;
+  /** Put here with Play next. Shuffle leaves these at the top. */
+  queuedNext?: boolean;
 };
 
 export type RepeatMode = "off" | "all" | "one";
@@ -127,6 +129,8 @@ export type PlaybackState = {
   appendToQueue: (tracks: (QueueTrack | ShelfItem)[]) => void;
   removeAt: (index: number) => void;
   moveTrack: (from: number, to: number) => void;
+  /** Play next on an Up next row: move it right after the current track. */
+  playNextAt: (from: number) => void;
   clearQueue: () => void;
   setAutoRadio: (on: boolean) => void;
   setQueueContinuation: (token?: string) => void;
@@ -184,6 +188,13 @@ function fisherYates<T>(arr: readonly T[]): T[] {
     [result[i], result[j]] = [result[j], result[i]];
   }
   return result;
+}
+
+/** Shuffle what's up next, leaving songs put there with Play next at the
+ *  top in their order, as Spotify and YouTube Music do. */
+function shuffleUpcoming(upcoming: readonly QueueTrack[]): QueueTrack[] {
+  const picked = upcoming.filter((t) => t.queuedNext);
+  return [...picked, ...fisherYates(upcoming.filter((t) => !t.queuedNext))];
 }
 
 const MAX_PERSISTED_QUEUE_TRACKS = 300;
@@ -324,7 +335,7 @@ const playbackStateCreator: StateCreator<PlaybackState> = (set, get) => ({
       : [mapped];
     // Honour an active shuffle for the trailing tracks (current stays first).
     if (get().shuffle && queue.length > 1) {
-      queue = [queue[0], ...fisherYates(queue.slice(1))];
+      queue = [queue[0], ...shuffleUpcoming(queue.slice(1))];
     }
     set({
       queue,
@@ -342,7 +353,10 @@ const playbackStateCreator: StateCreator<PlaybackState> = (set, get) => ({
     // the upcoming portion, matching setShuffle's semantics.
     let queue = tracks;
     if (get().shuffle) {
-      queue = [...tracks.slice(0, i + 1), ...fisherYates(tracks.slice(i + 1))];
+      queue = [
+        ...tracks.slice(0, i + 1),
+        ...shuffleUpcoming(tracks.slice(i + 1)),
+      ];
     }
     set({
       queue,
@@ -391,7 +405,7 @@ const playbackStateCreator: StateCreator<PlaybackState> = (set, get) => ({
     set((s) => {
       const next = [...s.queue];
       const insertAt = s.index < 0 ? 0 : s.index + 1;
-      next.splice(insertAt, 0, mapped);
+      next.splice(insertAt, 0, { ...mapped, queuedNext: true });
       return { queue: next };
     });
   },
@@ -469,6 +483,16 @@ const playbackStateCreator: StateCreator<PlaybackState> = (set, get) => ({
       }
       return { queue: next, index: newIndex };
     });
+  },
+
+  playNextAt: (from) => {
+    const { queue, index } = get();
+    // An Up next row: it moves up past nothing current, so index stays.
+    if (from <= index || from >= queue.length) return;
+    const next = queue.slice();
+    const [item] = next.splice(from, 1);
+    next.splice(index + 1, 0, { ...item, queuedNext: true });
+    set({ queue: next });
   },
 
   clearQueue: () => {
@@ -622,7 +646,7 @@ const playbackStateCreator: StateCreator<PlaybackState> = (set, get) => ({
       // through tracks the user actually heard.
       const after = Math.max(0, s.index + 1);
       const head = s.queue.slice(0, after);
-      const tail = fisherYates(s.queue.slice(after));
+      const tail = shuffleUpcoming(s.queue.slice(after));
       return { shuffle: true, queue: [...head, ...tail] };
     });
   },
@@ -685,6 +709,16 @@ usePlaybackStore.subscribe((s) => {
   }
 });
 
+// Reaching a Play next song, by any path (next, prev, a click, a removed
+// row, a new queue), uses up its place at the top.
+usePlaybackStore.subscribe((s) => {
+  const t = s.queue[s.index];
+  if (!t?.queuedNext) return;
+  const queue = s.queue.slice();
+  queue[s.index] = { ...t, queuedNext: undefined };
+  usePlaybackStore.setState({ queue });
+});
+
 /** Convenience selector for the currently-playing track (or undefined). */
 export function currentTrack(state: PlaybackState): QueueTrack | undefined {
   if (state.index < 0 || state.index >= state.queue.length) return undefined;
@@ -744,6 +778,7 @@ export function initFloatingPlaybackBridge(): void {
     goTo: (index) => sendAction({ type: "goTo", index }),
     removeAt: (index) => sendAction({ type: "removeAt", index }),
     moveTrack: (from, to) => sendAction({ type: "moveTrack", from, to }),
+    playNextAt: (from) => sendAction({ type: "playNextAt", from }),
     clearQueue: () => sendAction({ type: "clearQueue" }),
     appendToQueue: (tracks) =>
       sendAction({ type: "appendToQueue", tracks: tracks as unknown[] }),
