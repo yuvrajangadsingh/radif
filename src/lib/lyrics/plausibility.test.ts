@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   looksLikeSiteChrome,
+  offTitle,
+  rejectOffTitle,
   rejectSiteChrome,
 } from "@/lib/lyrics/plausibility";
 
@@ -163,5 +165,70 @@ describe("rejectSiteChrome", () => {
     };
     expect(gate(real)).toBe(real);
     expect(gate(null)).toBeNull();
+  });
+});
+
+describe("offTitle", () => {
+  // YouTube Music's plain lyrics for GM1kzbAgo_E on 2026-11-09, another song.
+  const WRONG = [
+    "Every night I sit here by my window (window)",
+    "Staring at the lonely avenue (avenue)",
+    "Like a walk in the park (things)",
+  ].join("\n");
+  const BOOTS = "These Boots Are Made For Walkin'";
+
+  it("flags Latin lyrics that share no main word with the title", () => {
+    expect(offTitle(BOOTS, WRONG)).toBe(true);
+  });
+
+  it("keeps lyrics with any of the title's main words", () => {
+    expect(offTitle(BOOTS, "These boots are made for walkin'")).toBe(false);
+    expect(offTitle("Whats Goin On Today", "What's going on")).toBe(false);
+    expect(
+      offTitle("Akhiyan Udeek Diyan Sajna", "Akhiaan udeekdian dil vaajaan"),
+    ).toBe(false);
+  });
+
+  it("stays out of short titles, digits and other scripts", () => {
+    expect(offTitle("Bohemian Rhapsody", WRONG)).toBe(false);
+    expect(offTitle("Bohemian Rhapsody (2011 Remaster)", WRONG)).toBe(false);
+    expect(offTitle("Bohemian Rhapsody - Remastered 2011", WRONG)).toBe(false);
+    expect(offTitle("Bohemian Rhapsody \u2013 2011 Remaster", WRONG)).toBe(
+      false,
+    );
+    expect(
+      offTitle("Bohemian Rhapsody (Remastered (2011) Version)", WRONG),
+    ).toBe(false);
+    expect(offTitle("Bohemian Rhapsody Tonight (2011 Remaster", WRONG)).toBe(
+      false,
+    );
+    expect(offTitle("Across Silent Empty Fields - Home", "Home again")).toBe(
+      false,
+    );
+    expect(offTitle("Aankhon Mein Tum", WRONG)).toBe(false);
+    expect(offTitle("1999 (Remastered)", "Two thousand zero zero")).toBe(false);
+    expect(offTitle("Kesariya Rang Laga", "केसरिया तेरा इश्क़ है पिया")).toBe(
+      false,
+    );
+  });
+
+  it("treats a decomposed accent as Latin", () => {
+    expect(offTitle(BOOTS, `${WRONG}\nCafe\u0301`)).toBe(true);
+  });
+
+  it("rejects only plain lyrics", () => {
+    const reject = rejectOffTitle("YouTube Music", BOOTS);
+    expect(reject({ kind: "plain", text: WRONG })).toBeNull();
+    const timed = {
+      kind: "timed" as const,
+      lines: [{ start: 0, text: "Staring at the lonely avenue" }],
+    };
+    expect(reject(timed as never)).toBe(timed);
+    expect(
+      rejectOffTitle(
+        "YouTube Music",
+        undefined,
+      )({ kind: "plain", text: WRONG }),
+    ).not.toBeNull();
   });
 });

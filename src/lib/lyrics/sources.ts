@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { fetchLrclibLyrics } from "@/lib/lyrics/lrclib";
 import { fetchYtMusicLyrics } from "@/lib/lyrics/ytmusic";
-import { rejectSiteChrome } from "@/lib/lyrics/plausibility";
+import { rejectOffTitle, rejectSiteChrome } from "@/lib/lyrics/plausibility";
 import { useLyricsSkip } from "@/lib/lyrics/skip";
 import {
   describeLyricsError,
@@ -19,8 +19,8 @@ export type LyricsSource = "ytmusic" | "lrclib";
 
 /**
  * YouTube Music leads because it is the only source keyed on the videoId
- * rather than on a fuzzy title/artist string: it structurally cannot hand
- * back another song's words, and the words it has are line-synced.
+ * rather than on a fuzzy title/artist string, and most of what it has is
+ * line-synced. It can still be wrong (see `rejectOffTitle`).
  */
 export const SOURCE_ORDER: LyricsSource[] = ["ytmusic", "lrclib"];
 
@@ -157,17 +157,22 @@ export function useLyricsSources(
   const askYtMusic = !!track?.videoId && enabled;
   const askByText = !!track && enabled && verifiable;
 
-  // Keyed on the videoId alone. No title, no artist, nothing to normalise.
+  // Looked up by the videoId alone; the title only checks plain text that
+  // shares none of its words (another song's lyrics on the video).
   const ytmusic = useQuery({
     // v2: results now pass the site-chrome gate (plausibility.ts); orphan
     // v1 entries that hydrate from the persisted cache without running it.
-    queryKey: ["lyrics", "ytmusic-v2", track?.videoId],
+    // v3: plain text with none of the title's words is rejected; orphan v2
+    // entries that cached another song's lyrics.
+    queryKey: ["lyrics", "ytmusic-v3", track?.videoId, title],
     queryFn: () =>
       logAttempt("ytmusic", () =>
         fetchYtMusicLyrics(
           track!.videoId,
           lyricsTimeoutSignal(PROVIDER_TIMEOUT_MS),
-        ).then(rejectSiteChrome("YouTube Music")),
+        )
+          .then(rejectSiteChrome("YouTube Music"))
+          .then(rejectOffTitle("YouTube Music", title)),
       ),
     enabled: askYtMusic,
     staleTime: ONE_HOUR,
