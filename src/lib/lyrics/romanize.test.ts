@@ -44,6 +44,22 @@ describe("romanize", () => {
     expect(romanize("வந்தேன்")).toBe("vandhen");
   });
 
+  it("voices a Tamil க after ழ் or ர் only in the -gal plural (QA r7 N1)", () => {
+    expect(romanize("நேர்கொண்ட")).toBe("nerkonda");
+    expect(romanize("கார்கில்")).toBe("kaarkil");
+    expect(romanize("ஆர்கெஸ்ட்ரா")).toBe("aarkestra");
+    expect(romanize("யார்கிட்ட")).toBe("yaarkitta");
+    expect(romanize("பேர்கொண்ட")).toBe("perkonda");
+    expect(romanize("உயிர்கொண்டு")).toBe("uyirkondu");
+    expect(romanize("உயிர்கள்")).toBe("uyirgal");
+    expect(romanize("மலர்களே")).toBe("malargale");
+    expect(romanize("அவள்")).toBe("aval");
+    // Suffixed compounds the word list couldn't hold (QA r8).
+    expect(romanize("கார்குழலி")).toBe("kaarkuzhali");
+    expect(romanize("மலர்கொடியே")).toBe("malarkodiye");
+    expect(romanize("கார்காலமே")).toBe("kaarkaalame");
+  });
+
   it("voices a Tamil க after ழ் or ர் unless doubled (QA r3 N2)", () => {
     expect(romanize("வாழ்க")).toBe("vaazhga");
     expect(romanize("மலர்கள்")).toBe("malargal");
