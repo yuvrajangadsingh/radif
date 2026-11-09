@@ -280,6 +280,13 @@ function ListenbrainzSection() {
   const setError = useSettingsStore((s) => s.setListenbrainzError);
   const [draft, setDraft] = useState("");
   const [checking, setChecking] = useState(false);
+  // A token refused while connecting; the stored error is for one that was
+  // refused later, and only shows while that token is still connected.
+  const [refused, setRefused] = useState(false);
+  const shownError = connected ? error : refused ? REJECTED : null;
+  // The draft now, so an answer for an older one is dropped.
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
 
   const check = async () => {
     const token = draft.trim();
@@ -287,11 +294,13 @@ function ListenbrainzSection() {
     setChecking(true);
     try {
       const name = await validateToken(token);
+      if (draftRef.current.trim() !== token) return;
       if (!name) {
-        setError(REJECTED);
+        setRefused(true);
         return;
       }
       connect(name, token);
+      setRefused(false);
       setDraft("");
       toast.success(`Connected to ListenBrainz as ${name}`);
     } catch {
@@ -338,6 +347,7 @@ function ListenbrainzSection() {
               size="sm"
               onClick={() => {
                 disconnect();
+                setRefused(false);
                 toast.success("Disconnected from ListenBrainz");
               }}
             >
@@ -360,7 +370,11 @@ function ListenbrainzSection() {
               placeholder="User token"
               aria-label="ListenBrainz user token"
               value={draft}
-              onChange={(e) => setDraft(e.target.value)}
+              onChange={(e) => {
+                setDraft(e.target.value);
+                setRefused(false);
+                setError(null);
+              }}
             />
             <Button
               type="submit"
@@ -373,9 +387,9 @@ function ListenbrainzSection() {
             </Button>
           </form>
         )}
-        {error ? (
+        {shownError ? (
           <span role="alert" className="text-[13px] text-destructive">
-            {error}
+            {shownError}
           </span>
         ) : null}
       </div>
