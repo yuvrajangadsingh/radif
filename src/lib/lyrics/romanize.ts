@@ -224,14 +224,18 @@ function deleteSchwas(a: Akshara[]): void {
   }
 }
 
-/** Loans the voicing rules can't know are loans: Sanskrit (deepam, not
- *  theebam) and English (doctor, not taaktar). Whole words only. */
+/** Words the voicing rules can't know: Sanskrit loans (deepam, not theebam),
+ *  English (doctor, not taaktar) and compounds whose second half starts
+ *  unvoiced (kaarkuzhal, not kaarguzhal). Whole words only. */
 const TAMIL_WORDS: Record<string, string> = {
   மோகன்லால்: "mohanlal",
   தீபம்: "deepam",
   பக்தி: "bakthi",
   டாக்டர்: "doctor",
   பஸ்: "bus",
+  கார்குழல்: "kaarkuzhal",
+  கார்காலம்: "kaarkaalam",
+  மலர்கொடி: "malarkodi",
 };
 
 const TAMIL_STOPS: Record<string, [unvoiced: string, voiced: string]> = {
