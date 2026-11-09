@@ -469,7 +469,9 @@ const playbackStateCreator: StateCreator<PlaybackState> = (set, get) => ({
       if (to < 0 || to >= s.queue.length) return s;
       const next = s.queue.slice();
       const [item] = next.splice(from, 1);
-      next.splice(to, 0, item);
+      // A song dragged by hand gives up its Play next place.
+      const moved = item.queuedNext ? { ...item, queuedNext: undefined } : item;
+      next.splice(to, 0, moved);
       // Keep the same track current after reorder. If the active track
       // itself is the one being moved, follow it to its new position.
       // Otherwise, account for items shifting around it.
