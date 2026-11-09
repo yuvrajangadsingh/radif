@@ -118,7 +118,7 @@ function SearchPage() {
   return (
     <div className="flex flex-col gap-6 px-6 pb-6 pt-3">
       <div className="flex items-baseline justify-between gap-4">
-        <h1 className="text-3xl font-bold tracking-tight">
+        <h1 className="line-clamp-2 min-w-0 break-words text-3xl font-bold tracking-tight">
           {query ? `Results for "${query}"` : "Search"}
         </h1>
         {scope === "catalog" && isFetching && !isLoading ? (
