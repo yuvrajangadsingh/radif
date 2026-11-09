@@ -11,7 +11,7 @@ import type { PlaybackState, QueueTrack } from "@/lib/store/playback";
   location: { search: "?floating-player" },
 };
 
-const { usePlaybackStore, resumePoint, createThrottledStorage } =
+const { usePlaybackStore, resumePoint, createThrottledStorage, noPickSince } =
   await import("@/lib/store/playback");
 
 function track(videoId: string): QueueTrack {
@@ -521,5 +521,27 @@ describe("Undo after Clear queue (QA r9)", () => {
     setup({ queue: [track("a")], index: 0, cleared: undefined });
     usePlaybackStore.getState().undoClear();
     expect(usePlaybackStore.getState().queue).toHaveLength(1);
+  });
+});
+
+describe("noPickSince (QA r13 N1)", () => {
+  it("turns false on the listener's queue actions only", () => {
+    setup({ queue: [track("a"), track("b"), track("c")], index: 0 });
+    const still = noPickSince();
+    usePlaybackStore.getState().patchTrackDuration("b", 200);
+    usePlaybackStore.getState().next();
+    usePlaybackStore.getState().appendToQueue([track("r")]);
+    expect(still()).toBe(true);
+    usePlaybackStore.getState().goTo(0);
+    expect(still()).toBe(false);
+    for (const act of [
+      () => usePlaybackStore.getState().playNextAt(3),
+      () => usePlaybackStore.getState().setQueue([track("a"), track("b")], 1),
+      () => usePlaybackStore.getState().enqueueNext(track("n")),
+    ]) {
+      const fresh = noPickSince();
+      act();
+      expect(fresh()).toBe(false);
+    }
   });
 });

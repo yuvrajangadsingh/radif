@@ -38,7 +38,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { usePlaybackStore } from "@/lib/store/playback";
+import { noPickSince, usePlaybackStore } from "@/lib/store/playback";
 import {
   useIsPinned,
   usePinnedPlaylistsStore,
@@ -267,7 +267,9 @@ function PlaylistPageView() {
     const op = opRef.current;
     if (shufflingRef.current === op) return;
     shufflingRef.current = op;
-    const stale = () => opRef.current !== op;
+    // A song picked, or the queue changed by hand, while it loads wins.
+    const noPick = noPickSince();
+    const stale = () => opRef.current !== op || !noPick();
     let loaded = tracks;
     const toastId = query.hasNextPage
       ? toast.loading("Loading the whole playlist to shuffle")

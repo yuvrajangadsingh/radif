@@ -96,6 +96,9 @@ export type PlaybackState = {
   /** How many times the queue has run out (last track done, repeat off):
    *  lets the audio engine tell that stop from a pause. */
   queueEnded: number;
+  /** Counts the listener's own queue actions (a pick, Play next, a new
+   *  queue, an edit), not next(), radio appends or filled-in durations. */
+  picks: number;
   /** Bumped when a failed song is played again in its own slot: the slot
    *  doesn't change there, so this is what tells the engine to reload. */
   reloads: number;
@@ -312,6 +315,11 @@ function reset(queue: QueueTrack[], i: number): Partial<PlaybackState> {
   };
 }
 
+// The store is defined below; actions call this after it exists.
+function bumpPicks(): void {
+  usePlaybackStore.setState((s) => ({ picks: s.picks + 1 }));
+}
+
 const playbackStateCreator: StateCreator<PlaybackState> = (set, get) => ({
   queue: [],
   index: -1,
@@ -334,10 +342,12 @@ const playbackStateCreator: StateCreator<PlaybackState> = (set, get) => ({
   position: 0,
   duration: 0,
   queueEnded: 0,
+  picks: 0,
   reloads: 0,
   pendingSeek: undefined,
 
   playNow: (track, extras) => {
+    bumpPicks();
     const mapped = shelfItemToTrack(track);
     if (!mapped) return;
     let queue = extras?.length
@@ -357,6 +367,7 @@ const playbackStateCreator: StateCreator<PlaybackState> = (set, get) => ({
   },
 
   setQueue: (tracks, startIndex = 0) => {
+    bumpPicks();
     if (tracks.length === 0) return;
     const i = Math.max(0, Math.min(startIndex, tracks.length - 1));
     // Honour an active shuffle: keep the chosen track current and shuffle
@@ -410,6 +421,7 @@ const playbackStateCreator: StateCreator<PlaybackState> = (set, get) => ({
   },
 
   enqueueNext: (track) => {
+    bumpPicks();
     const mapped = shelfItemToTrack(track);
     if (!mapped) return;
     set((s) => {
@@ -421,6 +433,7 @@ const playbackStateCreator: StateCreator<PlaybackState> = (set, get) => ({
   },
 
   enqueueEnd: (track) => {
+    bumpPicks();
     const mapped = shelfItemToTrack(track);
     if (!mapped) return;
     set((s) => ({ queue: [...s.queue, mapped] }));
@@ -437,6 +450,7 @@ const playbackStateCreator: StateCreator<PlaybackState> = (set, get) => ({
   },
 
   removeAt: (i) => {
+    bumpPicks();
     set((s) => {
       if (i < 0 || i >= s.queue.length) return s;
       const next = s.queue.slice();
@@ -473,6 +487,7 @@ const playbackStateCreator: StateCreator<PlaybackState> = (set, get) => ({
   },
 
   moveTrack: (from, to) => {
+    bumpPicks();
     set((s) => {
       if (from === to) return s;
       if (from < 0 || from >= s.queue.length) return s;
@@ -498,6 +513,7 @@ const playbackStateCreator: StateCreator<PlaybackState> = (set, get) => ({
   },
 
   playNextAt: (from) => {
+    bumpPicks();
     const { queue, index } = get();
     // An Up next row: it moves up past nothing current, so index stays.
     if (from <= index || from >= queue.length) return;
@@ -508,6 +524,7 @@ const playbackStateCreator: StateCreator<PlaybackState> = (set, get) => ({
   },
 
   clearQueue: () => {
+    bumpPicks();
     const { queue, index, position, playing, queueContinuation } = get();
     set({
       cleared: { queue, index, position, playing, queueContinuation },
@@ -523,6 +540,7 @@ const playbackStateCreator: StateCreator<PlaybackState> = (set, get) => ({
   },
 
   undoClear: () => {
+    bumpPicks();
     const c = get().cleared;
     if (!c) return;
     const track = c.queue[c.index];
@@ -618,6 +636,7 @@ const playbackStateCreator: StateCreator<PlaybackState> = (set, get) => ({
   },
 
   prev: () => {
+    bumpPicks();
     const { queue, index, position } = get();
     if (queue.length === 0) return;
     // If >3s in OR already on the first track, just rewind. Without the
@@ -641,6 +660,7 @@ const playbackStateCreator: StateCreator<PlaybackState> = (set, get) => ({
   },
 
   goTo: (i) => {
+    bumpPicks();
     const { queue } = get();
     if (i < 0 || i >= queue.length) return;
     set({ index: i, ...slotChange(get(), queue, i), playing: true });
@@ -766,6 +786,15 @@ usePlaybackStore.subscribe((s) => {
   queue[s.index] = { ...t, queuedNext: undefined };
   usePlaybackStore.setState({ queue });
 });
+
+/** True until the listener does something with the queue (a pick, Play
+ *  next, a new queue, an edit). For work that started from one queue and must
+ *  not land over their choice, like a Shuffle still loading pages. The queue
+ *  moving on by itself, radio appends and filled-in durations don't count. */
+export function noPickSince(): () => boolean {
+  const picks = usePlaybackStore.getState().picks;
+  return () => usePlaybackStore.getState().picks === picks;
+}
 
 /** Convenience selector for the currently-playing track (or undefined). */
 export function currentTrack(state: PlaybackState): QueueTrack | undefined {
