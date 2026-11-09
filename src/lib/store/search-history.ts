@@ -4,6 +4,9 @@ import { persist } from "zustand/middleware";
 /** How many queries we remember across sessions. We show only the top 5
  *  in the dropdown; the rest are kept around so dedupe reuses them. */
 const MAX = 25;
+// Longer than anyone types: a pasted page or a link's payload, not a search
+// worth offering again.
+const MAX_LENGTH = 100;
 
 type SearchHistoryState = {
   items: string[];
@@ -19,7 +22,7 @@ export const useSearchHistory = create<SearchHistoryState>()(
       push: (q) =>
         set((state) => {
           const trimmed = q.trim();
-          if (!trimmed) return state;
+          if (!trimmed || trimmed.length > MAX_LENGTH) return state;
           // Move to front, dedupe (case-insensitive).
           const lower = trimmed.toLowerCase();
           const rest = state.items.filter((x) => x.toLowerCase() !== lower);

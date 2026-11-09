@@ -17,6 +17,7 @@ export type UrlAction =
   | { kind: "search"; q: string };
 
 const PLAIN = ["play", "pause", "toggle", "next", "previous"] as const;
+const MAX_QUERY = 200;
 
 export function parseRadifUrl(raw: string): UrlAction | null {
   let url: URL;
@@ -31,7 +32,8 @@ export function parseRadifUrl(raw: string): UrlAction | null {
   const plain = PLAIN.find((p) => p === name);
   if (plain) return { kind: plain };
   if (name === "search") {
-    const q = url.searchParams.get("q")?.trim();
+    // Capped: a link can carry any length, and it lands in the heading.
+    const q = url.searchParams.get("q")?.trim().slice(0, MAX_QUERY);
     return q ? { kind: "search", q } : null;
   }
   return null;

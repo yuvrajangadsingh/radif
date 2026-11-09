@@ -23,6 +23,8 @@ describe("parseRadifUrl", () => {
       q: "tum ho",
     });
     expect(parseRadifUrl("radif://search")).toBeNull();
+    const long = parseRadifUrl(`radif://search?q=${"a".repeat(5000)}`);
+    expect(long).toEqual({ kind: "search", q: "a".repeat(200) });
     expect(parseRadifUrl("radif://search?q=%20")).toBeNull();
   });
 
