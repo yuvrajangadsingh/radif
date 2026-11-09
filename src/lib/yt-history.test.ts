@@ -168,6 +168,31 @@ describe("watchListen", () => {
     expect(onListen).toHaveBeenCalledTimes(1);
   });
 
+  it("takes a longer cap and says when the audio started (ListenBrainz)", () => {
+    const onStart = vi.fn();
+    const start = Date.now();
+    watchListen(onListen, { capSeconds: 240, onStart });
+    setPlayback({ position: 0 }); // loading: nothing moves
+    expect(onStart).not.toHaveBeenCalled();
+    play(1, 1);
+    expect(onStart).toHaveBeenCalledTimes(1);
+    expect(onStart).toHaveBeenCalledWith(start);
+    play(98, 1);
+    expect(onListen).not.toHaveBeenCalled();
+    play(1, 1); // 100 s: half of 200
+    expect(onListen).toHaveBeenCalledTimes(1);
+    expect(onStart).toHaveBeenCalledTimes(1);
+  });
+
+  it("caps a long track at 240 s for ListenBrainz", () => {
+    playback.duration = 900;
+    watchListen(onListen, { capSeconds: 240 });
+    play(239, 1);
+    expect(onListen).not.toHaveBeenCalled();
+    play(1, 1);
+    expect(onListen).toHaveBeenCalledTimes(1);
+  });
+
   it("does not count the stalled part of 30 s", () => {
     watchListen(onListen);
     play(30, 1, 0.5);

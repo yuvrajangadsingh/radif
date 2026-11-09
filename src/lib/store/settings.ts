@@ -51,6 +51,15 @@ type State = {
    *  scrobbling and off by default: an opt-in, since people often keep their
    *  likes intentionally different per platform. See `lib/lastfm.ts`. */
   lastfmLoveSync: boolean;
+  /** ListenBrainz user token the listener pasted in Settings: a bearer
+   *  credential, never logged. Null when not connected. */
+  listenbrainzToken: string | null;
+  /** The account the token belongs to, from validate-token. */
+  listenbrainzUser: string | null;
+  /** Submit listens while a token is set. Connecting turns it on. */
+  listenbrainzEnabled: boolean;
+  /** Set when ListenBrainz rejects the token; shown in Settings. */
+  listenbrainzError: string | null;
   /** Report each listen to the signed-in account's YouTube watch history,
    *  so the home feed and radio learn from plays here. On by default, the
    *  same as YouTube's own apps. See `lib/yt-history.ts`. */
@@ -80,6 +89,10 @@ type State = {
   setLastfmSession: (username: string, sessionKey: string) => void;
   /** Forget the connected account and stop scrobbling. */
   clearLastfmSession: () => void;
+  setListenbrainz: (user: string, token: string) => void;
+  clearListenbrainz: () => void;
+  setListenbrainzEnabled: (v: boolean) => void;
+  setListenbrainzError: (v: string | null) => void;
 };
 
 /**
@@ -104,6 +117,10 @@ export const useSettingsStore = create<State>()(
       lastfmUsername: null,
       lastfmAvatar: null,
       lastfmLoveSync: false,
+      listenbrainzToken: null,
+      listenbrainzUser: null,
+      listenbrainzEnabled: false,
+      listenbrainzError: null,
       ytHistory: true,
       normalizeVolume: false,
       romanizeLyrics: false,
@@ -133,6 +150,23 @@ export const useSettingsStore = create<State>()(
           lastfmEnabled: false,
           lastfmLoveSync: false,
         }),
+      setListenbrainz: (listenbrainzUser, listenbrainzToken) =>
+        set({
+          listenbrainzUser,
+          listenbrainzToken,
+          listenbrainzEnabled: true,
+          listenbrainzError: null,
+        }),
+      clearListenbrainz: () =>
+        set({
+          listenbrainzUser: null,
+          listenbrainzToken: null,
+          listenbrainzEnabled: false,
+          listenbrainzError: null,
+        }),
+      setListenbrainzEnabled: (listenbrainzEnabled) =>
+        set({ listenbrainzEnabled }),
+      setListenbrainzError: (listenbrainzError) => set({ listenbrainzError }),
     }),
     { name: "ytm-settings" },
   ),

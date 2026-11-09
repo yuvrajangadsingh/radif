@@ -18,7 +18,8 @@
         { "url": "https://yt3.googleusercontent.com/*" },
         { "url": "https://lh3.googleusercontent.com/*" },
         { "url": "https://itunes.apple.com/*" },
-        { "url": "https://lrclib.net/*" }
+        { "url": "https://lrclib.net/*" },
+        { "url": "https://api.listenbrainz.org/*" }
       ]
     },
     "store:default",
