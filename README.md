@@ -129,6 +129,24 @@ on the right, or in a small window you can pin on top. Playlists, likes,
 albums, artists, search with filters and radio are all there, and media keys
 and Now Playing stay in sync with the app both ways.
 
+### Control it from Raycast, Alfred or Shortcuts (Mac)
+
+Radif answers `radif://` links, so a launcher or a Shortcut can drive it:
+
+| Link | Does |
+| --- | --- |
+| `radif://play` | plays the current song |
+| `radif://pause` | pauses |
+| `radif://toggle` | plays or pauses |
+| `radif://next` | next song |
+| `radif://previous` | previous song |
+| `radif://search?q=tum%20ho` | opens search for "tum ho" (plays nothing) |
+
+From a terminal: `open "radif://next"`. On purpose, a link can't like, dislike,
+edit a playlist, change a setting or touch your account. It can play and skip,
+and what plays counts as played (your YouTube history and scrobbles, if those
+are on), so a burst of links does one thing, at most one every 300 ms.
+
 > Radif is an unofficial client. It isn't affiliated with, endorsed by, or
 > sponsored by Google or YouTube. "YouTube" and "YouTube Music" are trademarks
 > of Google LLC. Audio streams through [yt-dlp](https://github.com/yt-dlp/yt-dlp)
