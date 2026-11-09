@@ -44,6 +44,16 @@ describe("romanize", () => {
     expect(romanize("வந்தேன்")).toBe("vandhen");
   });
 
+  it("voices a Tamil க after ழ் or ர் unless doubled (QA r3 N2)", () => {
+    expect(romanize("வாழ்க")).toBe("vaazhga");
+    expect(romanize("மலர்கள்")).toBe("malargal");
+    expect(romanize("தமிழ்க் கவிதை")).toBe("thamizhk kavidhai");
+    expect(romanize("சேர்தல்")).toBe("serthal");
+    expect(romanize("வளர்பிறை")).toBe("valarpirai");
+    expect(romanize("பார்க்க")).toBe("paarkka");
+    expect(romanize("வாழ்க்கை")).toBe("vaazhkkai");
+  });
+
   it("keeps Tamil stops unvoiced when doubled or at the start", () => {
     expect(romanize("அக்கா")).toBe("akka");
     expect(romanize("அப்பா")).toBe("appa");
