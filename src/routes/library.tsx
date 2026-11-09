@@ -99,6 +99,8 @@ type SongSearch = {
 
 // Rows shown per playlist; the rest are a click away on the playlist itself.
 const HITS_SHOWN = 50;
+// How long a playlist loaded whole for search is reused.
+const WHOLE_STALE_MS = 10 * 60_000;
 const LIKED: UserPlaylist = { id: "LM", title: "Liked Music" };
 
 /**
@@ -154,16 +156,25 @@ function PlaylistSearch() {
       failed: 0,
       hits: [],
     });
+    let fetched = false;
     for (const [i, playlist] of list.entries()) {
-      if (i > 0) await new Promise((r) => setTimeout(r, 250));
+      const key = ["playlist-full", account, playlist.id];
+      const state = qc.getQueryState(key);
+      const cached =
+        state?.data !== undefined &&
+        !state.isInvalidated &&
+        Date.now() - state.dataUpdatedAt < WHOLE_STALE_MS;
+      // A beat between network loads only; a cached playlist answers at once.
+      if (!cached && fetched) await new Promise((r) => setTimeout(r, 250));
+      if (!cached) fetched = true;
       if (stale()) return;
       let tracks: ShelfItem[] = [];
       let failed = 0;
       try {
         const page = await qc.fetchQuery({
-          queryKey: ["playlist-full", account, playlist.id],
+          queryKey: key,
           queryFn: () => fetchPlaylist(playlist.id, stale),
-          staleTime: 10 * 60_000,
+          staleTime: WHOLE_STALE_MS,
         });
         tracks = page.tracks.filter((t) => trackMatches(t, wanted));
       } catch {
