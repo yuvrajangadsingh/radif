@@ -58,6 +58,9 @@ describe("romanize", () => {
     expect(romanize("இசை")).toBe("isai");
     expect(romanize("லக்ஷ்மி")).toBe("lakshmi");
     expect(romanize("காட்சி")).toBe("kaatchi");
+    expect(romanize("பச்சை")).toBe("pachai");
+    expect(romanize("மச்சான்")).toBe("machaan");
+    expect(romanize("உச்சம்")).toBe("ucham");
     expect(romanize("அந்தப் பாடல்")).toBe("andhap paadal");
     expect(romanize("காற்று")).toBe("kaatru");
     expect(romanize("வெற்றி")).toBe("vetri");
