@@ -1,4 +1,5 @@
 import { appLog } from "@/lib/app-log";
+import { rateHere } from "@/lib/store/disliked";
 import {
   collectContinuationItems,
   innertubePost,
@@ -28,7 +29,11 @@ async function rate(
   videoId: string,
 ): Promise<void> {
   try {
+    const askedAt = Date.now();
     const resp = await innertubePost(endpoint, { target: { videoId } }, AUTHED);
+    // Every rating made here goes through this: remember dislikes for the
+    // queue to skip, and forget one a like or a cleared rating replaces.
+    rateHere(videoId, endpoint === "like/dislike", askedAt);
     if (import.meta.env.DEV) {
       console.debug(`[mutations] ${endpoint} ${videoId} →`, resp);
     }

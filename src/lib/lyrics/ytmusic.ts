@@ -2,6 +2,7 @@ import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { rawNext } from "@/lib/innertube/shared";
 import type { Lyrics, TimedLine } from "@/lib/lyrics/types";
 import { LyricsHttpError } from "@/lib/lyrics/errors";
+import { learnDisliked } from "@/lib/store/disliked";
 
 /**
  * YouTube Music's own lyrics, over InnerTube.
@@ -148,11 +149,23 @@ function collect(node: unknown, key: string, out: unknown[] = []): unknown[] {
   return out;
 }
 
+/** The signed-in listener's rating from a `/next` response for one video:
+ *  playerOverlays...likeButtonRenderer.likeStatus. */
+export function readLikeStatus(res: unknown): string | undefined {
+  const button = collect(res, "likeButtonRenderer")[0] as YtNode | undefined;
+  const status = button?.likeStatus;
+  return typeof status === "string" ? status : undefined;
+}
+
 async function findLyricsBrowseId(
   videoId: string,
   signal?: AbortSignal,
 ): Promise<string | null> {
+  const askedAt = Date.now();
   const res = (await abortable(rawNext({ videoId }), signal)) as YtNode;
+  // The same response carries the listener's rating of this video, which is
+  // how a dislike made in another app reaches the queue's skip.
+  if (readLikeStatus(res) === "DISLIKE") learnDisliked(videoId, askedAt);
   for (const tab of collect(res, "tabRenderer") as YtNode[]) {
     const endpoint = (tab?.endpoint as YtNode)?.browseEndpoint as YtNode;
     if (!endpoint) continue;
