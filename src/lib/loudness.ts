@@ -27,9 +27,41 @@ export function loudnessGain(audioConfig: unknown): number {
   return Math.min(1, 10 ** ((TARGET_LKFS - (c.loudnessDb + reference)) / 20));
 }
 
-/** The gain for what's playing, 1 while the setting is off. Until a new
- *  track's answer lands the previous track's gain stays in place. */
-export function useLoudnessGain(videoId: string | undefined): number {
+// A track's loudness doesn't change, so its gain is kept for the session.
+// ponytail: unbounded, a number per track played or queued next; cap it if
+// sessions ever run to tens of thousands of tracks.
+const gains = new Map<string, number>();
+
+/** The gain for one track, asked once per session. A failure or a response
+ *  with no loudness isn't kept. */
+export function trackGain(
+  videoId: string,
+  account: string,
+  pageId: string | null,
+): Promise<number> {
+  const hit = gains.get(videoId);
+  if (hit !== undefined) return Promise.resolve(hit);
+  return playerInfo(videoId, account, pageId).then((player) => {
+    const config = player?.playerConfig?.audioConfig;
+    const gain = loudnessGain(config);
+    appLog(
+      `[loudness] ${videoId}: loudnessDb ${config?.loudnessDb} gain ${gain.toFixed(3)}`,
+    );
+    // Only a measurement is kept: a response without one (a playability or
+    // auth failure answered 200) is asked again next time.
+    if (typeof config?.loudnessDb === "number") gains.set(videoId, gain);
+    return gain;
+  });
+}
+
+/** The gain for what's playing, 1 while the setting is off. A track already
+ *  asked about (played before, or fetched while the one before it played)
+ *  starts at its own gain; a new one keeps the previous gain until its
+ *  answer lands, 0.5 to 1 s. Once it does, the next track's is fetched. */
+export function useLoudnessGain(
+  videoId: string | undefined,
+  nextVideoId: string | undefined,
+): number {
   const enabled = useSettingsStore((s) => s.normalizeVolume);
   const active = useAccounts().data?.find((a) => a.isActive);
   const account = active?.id;
@@ -41,15 +73,15 @@ export function useLoudnessGain(videoId: string | undefined): number {
       return;
     }
     let stale = false;
-    playerInfo(videoId, account, pageId).then(
-      (player) => {
+    trackGain(videoId, account, pageId).then(
+      (next) => {
         if (stale) return;
-        const config = player?.playerConfig?.audioConfig;
-        const next = loudnessGain(config);
-        appLog(
-          `[loudness] ${videoId}: loudnessDb ${config?.loudnessDb} gain ${next.toFixed(3)}`,
-        );
         setGain(next);
+        if (nextVideoId && nextVideoId !== videoId) {
+          trackGain(nextVideoId, account, pageId).catch(() => {
+            /* asked again when it plays */
+          });
+        }
       },
       (e: unknown) => {
         if (stale) return;
@@ -62,6 +94,7 @@ export function useLoudnessGain(videoId: string | undefined): number {
     return () => {
       stale = true;
     };
-  }, [enabled, videoId, account, pageId]);
-  return gain;
+  }, [enabled, videoId, nextVideoId, account, pageId]);
+  const known = enabled && videoId && account ? gains.get(videoId) : undefined;
+  return known ?? gain;
 }

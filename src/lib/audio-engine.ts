@@ -1561,7 +1561,13 @@ export function useAudioEngine() {
 
   // Volume / mute follow store.
   const volume = usePlaybackStore((s) => s.volume);
-  const loudnessGain = useLoudnessGain(streamVideoId);
+  const upNextId = usePlaybackStore((s) => s.queue[s.index + 1]?.videoId);
+  const nextStreamId = useTrackSourceStore((s) =>
+    upNextId
+      ? resolveStreamId(upNextId, s.byVideoId, s.preferVideo)
+      : undefined,
+  );
+  const loudnessGain = useLoudnessGain(streamVideoId, nextStreamId);
   const muted = usePlaybackStore((s) => s.muted);
   useEffect(() => {
     const el = audioRef.current;
