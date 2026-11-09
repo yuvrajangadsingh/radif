@@ -204,6 +204,11 @@ describe("romanize", () => {
     expect(romanize("तू")).toBe("tu");
     expect(romanize("ਸਾਨੂੰ")).toBe("saanu");
     expect(romanize("हुँ")).toBe("hoon");
+    expect(romanize("कहुँ")).toBe("kahoon");
+    expect(romanize("तुँ")).toBe("tu");
+    expect(romanize("सुँ")).toBe("su");
+    expect(romanize("करुँ")).toBe("karoon");
+    expect(romanize("चलुं")).toBe("chaloon");
     expect(romanize("मैं जीता हुँ")).toBe("main jeeta hoon");
     expect(romanize("ਤੁੰ")).toBe("tu");
   });
