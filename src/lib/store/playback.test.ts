@@ -319,6 +319,26 @@ describe("landing on the slot already playing", () => {
     expect(usePlaybackStore.getState().streamUrl).toBeUndefined();
   });
 
+  it("reloads a failed song on its own slot", () => {
+    setup({ ...playing, queue: [track("a"), track("b")], status: "error" });
+    const before = usePlaybackStore.getState().reloads;
+    usePlaybackStore.getState().goTo(0);
+    expect(usePlaybackStore.getState().status).toBe("loading");
+    expect(usePlaybackStore.getState().streamUrl).toBeUndefined();
+    expect(usePlaybackStore.getState().reloads).toBe(before + 1);
+    // A healthy one keeps playing and doesn't ask for a reload.
+    setup({ ...playing, queue: [track("a"), track("b")] });
+    usePlaybackStore.getState().goTo(0);
+    expect(usePlaybackStore.getState().reloads).toBe(before + 1);
+    setup({ ...playing, status: "error", playing: false });
+    usePlaybackStore
+      .getState()
+      .playNow({ kind: "song", id: "a", title: "a", thumbnails: [] }, [
+        track("b"),
+      ]);
+    expect(usePlaybackStore.getState().streamUrl).toBeUndefined();
+  });
+
   it("reloads for two copies, a failed song and a paused load", () => {
     const radio = () =>
       usePlaybackStore

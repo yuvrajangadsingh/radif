@@ -94,6 +94,9 @@ export type PlaybackState = {
   /** How many times the queue has run out (last track done, repeat off):
    *  lets the audio engine tell that stop from a pause. */
   queueEnded: number;
+  /** Bumped when a failed song is played again in its own slot: the slot
+   *  doesn't change there, so this is what tells the engine to reload. */
+  reloads: number;
   /** Real duration (from audio element, once loaded). */
   duration: number;
   /** When the user drags the slider, we seek here on release. */
@@ -263,7 +266,13 @@ function slotChange(
 ): Partial<PlaybackState> {
   const current = s.queue[s.index]?.videoId;
   if (current !== queue[i].videoId) return reset(queue, i);
-  if (s.index === i) return {};
+  // A failed song reloads even in its own slot: playing the dead element
+  // again does nothing.
+  if (s.index === i) {
+    return s.status === "error"
+      ? { ...reset(queue, i), reloads: s.reloads + 1 }
+      : {};
+  }
   const moved =
     queue !== s.queue &&
     // Paused, only once it loaded: a paused stalled load gets a fresh one.
@@ -304,6 +313,7 @@ const playbackStateCreator: StateCreator<PlaybackState> = (set, get) => ({
   position: 0,
   duration: 0,
   queueEnded: 0,
+  reloads: 0,
   pendingSeek: undefined,
 
   playNow: (track, extras) => {

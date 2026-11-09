@@ -292,6 +292,16 @@ export function useAudioEngine() {
   // without any of its real deps changing — used to re-fetch a fresh
   // stream URL after a transient failure (e.g. a googlevideo 403).
   const [retryNonce, setRetryNonce] = useState(0);
+  // A failed song played again in its own slot: same slot, so reload it the
+  // way the error retry does, with its one auto-retry back.
+  const reloads = usePlaybackStore((s) => s.reloads);
+  const seenReloadsRef = useRef(reloads);
+  useEffect(() => {
+    if (reloads === seenReloadsRef.current) return;
+    seenReloadsRef.current = reloads;
+    retriedTrackRef.current = null;
+    setRetryNonce((n) => n + 1);
+  }, [reloads]);
   // See the stall watchdog below for why this is as long as it is. It
   // has to clear the whole legitimate pre-byte budget: a signed-in
   // resolve may run 30s to its ceiling, the anonymous fallback 15s more,
