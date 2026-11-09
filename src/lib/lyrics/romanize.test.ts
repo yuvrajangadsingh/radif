@@ -54,6 +54,10 @@ describe("romanize", () => {
     expect(romanize("உயிர்கள்")).toBe("uyirgal");
     expect(romanize("மலர்களே")).toBe("malargale");
     expect(romanize("அவள்")).toBe("aval");
+    // Suffixed compounds the word list couldn't hold (QA r8).
+    expect(romanize("கார்குழலி")).toBe("kaarkuzhali");
+    expect(romanize("மலர்கொடியே")).toBe("malarkodiye");
+    expect(romanize("கார்காலமே")).toBe("kaarkaalame");
   });
 
   it("voices a Tamil க after ழ் or ர் unless doubled (QA r3 N2)", () => {
