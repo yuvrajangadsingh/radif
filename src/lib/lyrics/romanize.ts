@@ -343,10 +343,14 @@ function spell(a: Akshara[], s: Script): string {
     }
     // A final long aa keeps its length when nasal (maa, haan, not man), and so
     // does an oo in Devanagari (hoon, yoon). Gurmukhi's nasal u is typed short
-    // (saanu).
+    // (saanu). A vowel letter standing alone is sung long (aa aa aa); one on
+    // a consonant is still typed short (ka, na, pa).
+    const alone = a.length === 1 && !x.consonant;
     const keepsLength =
-      nasalEnd &&
-      ((vowel === "aa" && !afterIya) || (vowel === "oo" && s === DEVANAGARI));
+      alone ||
+      (nasalEnd &&
+        ((vowel === "aa" && !afterIya) ||
+          (vowel === "oo" && s === DEVANAGARI)));
     if (end && s.schwaDeletion && !keepsLength) {
       vowel = { aa: "a", ee: "i", oo: "u" }[vowel] ?? vowel;
     }
