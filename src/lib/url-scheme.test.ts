@@ -4,8 +4,9 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn() }));
 vi.mock("@tanstack/react-router", () => ({ useNavigate: vi.fn() }));
 vi.mock("@/lib/store/playback", () => ({ usePlaybackStore: {} }));
+vi.mock("@/lib/store/premium", () => ({ usePremiumStore: {} }));
 
-const { parseRadifUrl } = await import("./url-scheme");
+const { parseRadifUrl, waitsForPremium } = await import("./url-scheme");
 
 describe("parseRadifUrl", () => {
   it("reads the playback actions, either way they're written", () => {
@@ -30,5 +31,16 @@ describe("parseRadifUrl", () => {
     expect(parseRadifUrl("radif://playlist/add?id=x")).toBeNull();
     expect(parseRadifUrl("https://play")).toBeNull();
     expect(parseRadifUrl("not a url")).toBeNull();
+  });
+});
+
+describe("waitsForPremium (QA r14 N1)", () => {
+  it("holds playback until the Premium check answers, never search", () => {
+    for (const kind of ["play", "toggle", "next"] as const) {
+      expect(waitsForPremium({ kind }, null)).toBe(true);
+      expect(waitsForPremium({ kind }, "premium")).toBe(false);
+      expect(waitsForPremium({ kind }, "free")).toBe(false);
+    }
+    expect(waitsForPremium({ kind: "search", q: "x" }, null)).toBe(false);
   });
 });
