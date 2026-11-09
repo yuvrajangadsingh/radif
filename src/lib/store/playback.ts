@@ -253,9 +253,9 @@ export function createThrottledStorage(delay = 1000): StateStorage {
  *  what's playing, clicking its card) loads nothing, so resetting here
  *  left a spinner and a 0:00 duration that nothing ever cleared. It just keeps
  *  playing. Start radio also moves a song from later in the queue to the
- *  front: a new queue holding it once keeps it too, while it plays. A paused
- *  or finished one loads from the start there (an end guard's last
- *  timeupdate can leave a stale position), as does a queue with two copies. */
+ *  front: a new queue holding it once keeps it too, playing or paused, the
+ *  way it does at index 0 (a finished one was rewound by next()). A failed
+ *  one loads again, as does a queue with two copies. */
 function slotChange(
   s: PlaybackState,
   queue: QueueTrack[],
@@ -266,8 +266,8 @@ function slotChange(
   if (s.index === i) return {};
   const moved =
     queue !== s.queue &&
-    s.playing &&
-    s.status !== "error" &&
+    // Paused, only once it loaded: a paused stalled load gets a fresh one.
+    (s.playing ? s.status !== "error" : s.status === "ready") &&
     queue.filter((t) => t.videoId === current).length === 1;
   return moved ? {} : reset(queue, i);
 }
@@ -508,7 +508,14 @@ const playbackStateCreator: StateCreator<PlaybackState> = (set, get) => ({
     let nextIndex = index + 1;
     if (nextIndex >= queue.length) {
       if (repeat !== "all") {
-        set({ playing: false, position: 0, queueEnded: get().queueEnded + 1 });
+        // Rewind too: an outro or end guard stops the element mid-file, and
+        // a later play of this slot (Play, Start radio) must start it over.
+        set({
+          playing: false,
+          position: 0,
+          pendingSeek: 0,
+          queueEnded: get().queueEnded + 1,
+        });
         return;
       }
       // Looping with shuffle on → reshuffle so the next pass isn't identical.
