@@ -102,6 +102,30 @@ when it launches, at most once every three days.
 
 </details>
 
+Radif needs macOS 10.15 or later. It hasn't been tested on macOS 15 or older.
+
+## What happens when you sign in
+
+- You sign in on Google's own page (accounts.google.com), shown in a separate
+  window inside Radif. Radif doesn't keep your password. What it keeps are the
+  session cookies Google sets once you're signed in, the same thing a browser
+  keeps.
+- The cookies stay on your Mac. They're encrypted (AES-256-GCM) in Radif's own
+  data folder, with the key in a file next to them that only your macOS user
+  can read. That stops a stray copy of the cookie file from being readable; it
+  doesn't stop someone who can already use your Mac account. yt-dlp needs
+  them unencrypted, so Radif also keeps a plain copy for it in the same folder,
+  readable only by your macOS user, and clears it when you sign out or the app
+  starts.
+- They're sent only to YouTube and Google, to load your library and play
+  music, and to [yt-dlp](https://github.com/yt-dlp/yt-dlp), which runs on your
+  Mac and downloads the audio. Nothing goes to a server of ours; there isn't
+  one.
+- Radif is open source, so you can check all of this: the sign-in window is
+  `start_login` and the encryption is `secure_store`, both in
+  [`src-tauri/src/lib.rs`](src-tauri/src/lib.rs), and the cookie files are
+  written by [`src-tauri/src/authfs.rs`](src-tauri/src/authfs.rs).
+
 ## What it does
 
 The fullscreen player shows the cover and synced lyrics over a backdrop taken
