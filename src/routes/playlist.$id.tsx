@@ -237,6 +237,15 @@ function PlaylistPageView() {
 
   const shufflePlaylist = async () => {
     const store = usePlaybackStore.getState();
+    // With a filter on, Shuffle means the tracks it shows. The filter loads
+    // every page; Shuffle stays disabled until it has, so this is the whole
+    // matching set.
+    if (normalizedQuery) {
+      if (visibleTracks.length > 0 && !query.hasNextPage) {
+        store.shufflePlayShelfItems(visibleTracks);
+      }
+      return;
+    }
     // Prefer YTM's server-side shuffle: one /next call returns a fresh
     // permutation over the ENTIRE playlist (not just the pages scrolled
     // into view so far), and the rest of the permutation streams in via
@@ -316,14 +325,23 @@ function PlaylistPageView() {
           openedFromArtist
             ? undefined
             : () => {
-                if (tracks.length > 0) {
-                  usePlaybackStore.getState().playShelfItems(tracks, 0);
+                // With a filter on, Play means the tracks it shows, like
+                // Shuffle (both wait for every page to load).
+                const list = normalizedQuery ? visibleTracks : tracks;
+                if (normalizedQuery && query.hasNextPage) return;
+                if (list.length > 0) {
+                  // Off first: with shuffle on, building the queue would
+                  // shuffle what Play promised in order.
                   usePlaybackStore.getState().setShuffle(false);
+                  usePlaybackStore.getState().playShelfItems(list, 0);
                 }
               }
         }
         onShuffle={
           openedFromArtist ? undefined : () => void shufflePlaylist()
+        }
+        playbackDisabled={
+          !!normalizedQuery && (visibleTracks.length === 0 || query.hasNextPage)
         }
         actions={
           isArtistTopSongs ||

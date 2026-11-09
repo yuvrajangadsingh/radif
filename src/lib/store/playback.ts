@@ -248,6 +248,40 @@ export function createThrottledStorage(delay = 1000): StateStorage {
   };
 }
 
+/** The reset for landing on slot `i` of `queue`. The audio engine reloads on
+ *  a new video or slot; the same song staying in the same slot (Start radio on
+ *  what's playing, clicking its card) loads nothing, so resetting here
+ *  left a spinner and a 0:00 duration that nothing ever cleared. It just keeps
+ *  playing. Start radio also moves a song from later in the queue to the
+ *  front: a new queue holding it once keeps it too, while it plays. A paused
+ *  or finished one loads from the start there (an end guard's last
+ *  timeupdate can leave a stale position), as does a queue with two copies. */
+function slotChange(
+  s: PlaybackState,
+  queue: QueueTrack[],
+  i: number,
+): Partial<PlaybackState> {
+  const current = s.queue[s.index]?.videoId;
+  if (current !== queue[i].videoId) return reset(queue, i);
+  if (s.index === i) return {};
+  const moved =
+    queue !== s.queue &&
+    s.playing &&
+    s.status !== "error" &&
+    queue.filter((t) => t.videoId === current).length === 1;
+  return moved ? {} : reset(queue, i);
+}
+
+function reset(queue: QueueTrack[], i: number): Partial<PlaybackState> {
+  return {
+    status: "loading",
+    streamUrl: undefined,
+    position: 0,
+    duration: queue[i].duration ?? 0,
+    error: undefined,
+  };
+}
+
 const playbackStateCreator: StateCreator<PlaybackState> = (set, get) => ({
   queue: [],
   index: -1,
@@ -285,12 +319,8 @@ const playbackStateCreator: StateCreator<PlaybackState> = (set, get) => ({
     set({
       queue,
       index: 0,
-      status: "loading",
-      streamUrl: undefined,
-      position: 0,
-      duration: mapped.duration ?? 0,
+      ...slotChange(get(), queue, 0),
       playing: true,
-      error: undefined,
       queueContinuation: undefined,
     });
   },
@@ -307,12 +337,8 @@ const playbackStateCreator: StateCreator<PlaybackState> = (set, get) => ({
     set({
       queue,
       index: i,
-      status: "loading",
-      streamUrl: undefined,
-      position: 0,
-      duration: queue[i].duration ?? 0,
+      ...slotChange(get(), queue, i),
       playing: true,
-      error: undefined,
       queueContinuation: undefined,
     });
   },
@@ -528,16 +554,7 @@ const playbackStateCreator: StateCreator<PlaybackState> = (set, get) => ({
   goTo: (i) => {
     const { queue } = get();
     if (i < 0 || i >= queue.length) return;
-    const track = queue[i];
-    set({
-      index: i,
-      status: "loading",
-      streamUrl: undefined,
-      position: 0,
-      duration: track.duration ?? 0,
-      playing: true,
-      error: undefined,
-    });
+    set({ index: i, ...slotChange(get(), queue, i), playing: true });
   },
 
   setStatus: (status, error) => set({ status, error }),

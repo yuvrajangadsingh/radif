@@ -161,6 +161,8 @@ export async function reportListen(
       );
       return;
     }
+    // Its own request, never the loudness memo's: the tracking url belongs to
+    // the channel the request went out as, and only this path checks that.
     const player = await innertubePost(
       "player",
       {

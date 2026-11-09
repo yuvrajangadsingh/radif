@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
+  AudioLinesIcon,
   BellIcon,
   Loader2Icon,
   LogInIcon,
@@ -19,6 +20,7 @@ import { Group, SettingRow, TabPane } from "@/components/settings/primitives";
 import { IS_MAC } from "@/lib/platform";
 import { authLoggedInQuery } from "@/lib/store/auth-queries";
 import { useSettingsStore } from "@/lib/store/settings";
+import { useAccounts } from "@/lib/store/accounts";
 
 export function GeneralTab() {
   return (
@@ -115,6 +117,13 @@ function BehaviorGroup() {
   const setPlaybackNotifications = useSettingsStore(
     (s) => s.setPlaybackNotifications,
   );
+  const normalizeVolume = useSettingsStore((s) => s.normalizeVolume);
+  // The same check the gain itself uses (lib/loudness.ts): no active account,
+  // no measurement, so the switch would do nothing.
+  // Still loading counts as signed in, so the switch doesn't flash off.
+  const accounts = useAccounts().data;
+  const signedIn = !accounts || accounts.some((a) => a.isActive);
+  const setNormalizeVolume = useSettingsStore((s) => s.setNormalizeVolume);
   const notchSongPeek = useSettingsStore((s) => s.notchSongPeek);
   const setNotchSongPeek = useSettingsStore((s) => s.setNotchSongPeek);
 
@@ -161,6 +170,23 @@ function BehaviorGroup() {
             checked={playbackNotifications}
             onCheckedChange={setPlaybackNotifications}
             aria-label="Playback notifications"
+          />
+        }
+      />
+      <SettingRow
+        icon={AudioLinesIcon}
+        title="Normalize volume"
+        description={
+          signedIn
+            ? "Plays tracks at a similar loudness, using YouTube's measurement of each one. Loud tracks get quieter; quiet ones stay as they are."
+            : "Needs a signed-in account: YouTube only gives its loudness measurement to one."
+        }
+        control={
+          <Switch
+            checked={normalizeVolume && signedIn}
+            disabled={!signedIn}
+            onCheckedChange={setNormalizeVolume}
+            aria-label="Normalize volume"
           />
         }
       />

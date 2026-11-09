@@ -9,6 +9,70 @@ time; they are quoted, not rounded up.
 
 ---
 
+## 2026-11-07 · QA findings left for 0.8 (rounds 2 and 3)
+
+**Decided:** not in 0.7.0 (the M4's calls on QA rounds 2 and 3, reports in
+the M5's gitignored `.notes/qa-2026-11-07-r2.md` and `-r3.md`). Round 2's
+"Play again restarts the playing track" was a misread, per round 3, so it's
+not listed.
+
+- **Long vowels spelled as written, not as typed (QA N3).** ਕਾਲੀਆਂ ਗੱਡੀਆਂ
+  comes out kaaleeaan gaddeeaan where people type kaaliyan gaddiyan, and हूँ
+  comes out hu (typed hoon or hun). Romanization keeps medial long vowels
+  long on purpose (naal, pyaar); the vowel-plus-aan endings and हूँ need their
+  own rules.
+- **Rule-based spellings that aren't how people type them (QA round 3 N2).**
+  Sanskrit loans in Tamil (மோகன்லால் moganlaal for Mohanlal, தீபம் theebam,
+  பக்தி pakthi), English in Tamil script (டாக்டர் taaktar, பஸ் pas), a
+  doubled ச spelled chch (pachchai, machchaan, where people write pachai,
+  machan), and no voicing after ழ் or ர் (vaazhka, malarkal). A rule can't
+  know a word's origin; these need a small word list.
+
+---
+
+## 2026-11-07 · QA findings left for after 0.7.0
+
+**Decided:** these stay as they are in 0.7.0 (the M4's call on the QA pass of
+develop @ 81c9fe7, report in the M5's gitignored `.notes/qa-2026-11-07.md`).
+
+- **Gain arrives late at track start (QA L1).** With Normalize volume on, a
+  track plays at the previous track's gain (gain 1 for the first after launch)
+  until its player response lands, 0.5 to 1 s, or longer if the 60 s memo
+  expired. Already listed as Known on the PR. A fix would hold the element's
+  volume until the gain is known, or fetch the next track's response ahead.
+- **Shuffle on after Play next reshuffles the tail.** `setShuffle` shuffles
+  everything after the current track, so a song placed next loses its place.
+  A fix would keep the next slot out of the shuffle.
+- **Cover and controls overflow at the minimum height** (found by Codex on the
+  L6 fix). At 600 pt with a 420 pt right panel the cover, title and transport
+  controls need more height than the panel has. Lyrics no longer draw over the
+  bottom row; the cover sizing is what's left.
+- **Retry allowance keyed on videoId and index.** The stall watchdog and the
+  error retry remember a retried track as `videoId:index`, so moving it resets
+  its one retry. Harmless; noted while fixing M1.
+
+---
+
+## 2026-11-07 · Genius removed as a lyrics source
+
+**Decided:** delete the provider, its allowlist entry and its README and About
+mentions. Sources are now YouTube Music and LRCLIB. A failed lyrics query
+refetches on window focus only after a network or 5xx failure, not after a
+rate limit or a 4xx.
+
+**Why:** every Genius search in the M5 log since Nov 6 answered HTTP 403 (276
+of 276, then about 20 more in the QA pass on Nov 7), and the app's own
+`genius.com/api/search` call 403s from curl too. Errored queries refetch on
+focus by design, so each app activation sent two more doomed requests with the
+track's title and artist. A source that never answers is a dead menu option
+and a privacy cost for nothing.
+
+**Rejected:** keeping it in the menu disabled; nothing on our side can make it
+answer. LRCLIB now treats a 429 as a rate limit (the contract Genius was the
+only provider testing).
+
+---
+
 ## 2026-11-07 · Musixmatch removed as a lyrics source
 
 **Decided:** delete the provider, its allowlist entry and its mentions in the

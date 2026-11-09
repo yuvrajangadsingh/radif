@@ -282,6 +282,7 @@ const HeaderActions = memo(function HeaderActions({
       {config.onPlay ? (
         <Button
           onClick={config.onPlay}
+          disabled={config.playbackDisabled}
           className="bg-brand text-white hover:bg-brand/90"
         >
           <PlayIcon className="fill-current" />
@@ -289,7 +290,11 @@ const HeaderActions = memo(function HeaderActions({
         </Button>
       ) : null}
       {config.onShuffle ? (
-        <Button variant="outline" onClick={config.onShuffle}>
+        <Button
+          variant="outline"
+          onClick={config.onShuffle}
+          disabled={config.playbackDisabled}
+        >
           <ShuffleIcon />
           Shuffle
         </Button>
