@@ -236,7 +236,8 @@ const TAMIL_STOPS: Record<string, [unvoiced: string, voiced: string]> = {
  *  of a word, after another consonant, doubled or with no vowel of their own
  *  (kandu's k, akka, pattu, lakshmi), voiced after a nasal (anbe, kandu's d,
  *  pandhu, nenjam) and between vowels (magan, paadal). ச is j after ஞ, ch
- *  doubled or after ட் ற் (kaatchi), and s elsewhere (paasam, isai). ற் ற is
+ *  doubled (pachai, written once) or after ட் ற் (kaatchi), and s elsewhere
+ *  (paasam, isai). ற் ற is
  *  tr (kaatru, vetri) and ன் ற ndr (thendral). A word-final aa is typed short
  *  (akka, appa), except in a one-letter word (vaa). */
 function tamilVoicing(a: Akshara[]): void {
@@ -270,8 +271,11 @@ function tamilVoicing(a: Akshara[]): void {
       !!prev && !cluster && prev.vowel !== "" && x.vowel !== "";
     const voiced = !doubled && (afterNasal || betweenVowels);
     if (latin[i] === "C") {
+      // A doubled ச is typed once (pachai, machaan), so the first goes.
       x.consonant =
-        doubled || (cluster && /^(T|R)$/.test(prevLatin))
+        x.vowel === "" && latin[i + 1] === "C"
+          ? ""
+          : doubled || (cluster && /^(T|R)$/.test(prevLatin))
           ? "ch"
           : cluster && prevLatin === "nj"
             ? "j"
