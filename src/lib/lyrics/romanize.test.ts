@@ -209,6 +209,14 @@ describe("romanize", () => {
     expect(romanize("ਜਾਨਾਂ")).toBe("jaanaan");
   });
 
+  it("keeps a vowel letter standing alone long (QA r4)", () => {
+    expect(romanize("आ आ आ")).toBe("aa aa aa");
+    expect(romanize("ਆ")).toBe("aa");
+    expect(romanize("ऊ")).toBe("oo");
+    expect(romanize("पा")).toBe("pa");
+    expect(romanize("ना")).toBe("na");
+  });
+
   it("keeps other text in a mixed line", () => {
     expect(romanize("Baby तू (ooh), 2 बार")).toBe("Baby tu (ooh), 2 baar");
   });
