@@ -183,6 +183,9 @@ describe("romanize", () => {
     expect(romanize("तुमको मैं जीता हूँ")).toBe("tumko main jeeta hoon");
     expect(romanize("तू")).toBe("tu");
     expect(romanize("ਸਾਨੂੰ")).toBe("saanu");
+    expect(romanize("हुँ")).toBe("hoon");
+    expect(romanize("मैं जीता हुँ")).toBe("main jeeta hoon");
+    expect(romanize("ਤੁੰ")).toBe("tu");
   });
 
   it("puts a y glide between a short vowel and e (N3)", () => {
