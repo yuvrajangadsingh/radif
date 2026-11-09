@@ -121,9 +121,8 @@ export function rejectSiteChrome(source: string) {
  * 2026-11-09, "These Boots Are Made For Walkin'" (Nancy Sinatra, live on Ed
  * Sullivan, GM1kzbAgo_E): YouTube Music's own lyrics for that video are
  * another song's ("Staring at the lonely avenue"), so a videoId-keyed lookup
- * can be wrong too. No lyrics beats another song's, as with artist-less
- * tracks, so the cost of a wrong call is a blank panel; the rule is narrow
- * for that reason. Plain text only, Latin letters only, and the title needs
+ * can be wrong too. Text that fails this loses to any other source
+ * (`markOffTitle`); the rule stays narrow so the right lyrics rarely do. Plain text only, Latin letters only, and the title needs
  * three words of four letters or more (past a few fillers) of which none
  * shows up in the words. A title word matches a sung word that starts with
  * its first five letters, so romanized spellings and dropped endings still
@@ -172,13 +171,16 @@ export function offTitle(title: string, text: string): boolean {
   return !titleWords.some((w) => sung.some((s) => s.startsWith(w.slice(0, 5))));
 }
 
-export function rejectOffTitle(source: string, title: string | undefined) {
+/** Mark plain lyrics that look like another song's. They aren't dropped:
+ *  a title that's never sung (Smells Like Teen Spirit) trips this too, so
+ *  they still show when no other source has anything. */
+export function markOffTitle(source: string, title: string | undefined) {
   return (lyrics: Lyrics | null): Lyrics | null => {
     if (!lyrics || lyrics.kind !== "plain" || !title) return lyrics;
     if (!offTitle(title, lyrics.text)) return lyrics;
     appLog(
-      `lyrics from ${source} rejected: none of the title's main words in them, likely another song's`,
+      `lyrics from ${source}: none of the title's main words in them, shown only if nothing else has lyrics`,
     );
-    return null;
+    return { ...lyrics, offTitle: true };
   };
 }
