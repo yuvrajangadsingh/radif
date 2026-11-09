@@ -1,3 +1,4 @@
+import { learnFromRows } from "@/lib/store/disliked";
 import type { PlaylistPage, ShelfItem } from "./types";
 import { parseTrackCount } from "./parse-count";
 import {
@@ -290,7 +291,10 @@ export async function fetchPlaylistFirstPage(
 ): Promise<PlaylistFirstPage> {
   const browseId = id.startsWith("VL") ? id : `VL${id}`;
   const rawId = browseId.slice(2);
+  const askedAt = Date.now();
   const json = await rawBrowse(browseId);
+  // The rows carry the listener's rating: learn dislikes for the queue skip.
+  learnFromRows(json, askedAt);
 
   if (import.meta.env.DEV) {
     console.debug("[playlist] browse response", browseId, json);
@@ -419,7 +423,9 @@ export async function fetchPlaylistFirstPage(
 export async function fetchPlaylistContinuation(
   token: string,
 ): Promise<PlaylistNextPage> {
+  const askedAt = Date.now();
   const json = await rawBrowseContinuation(token);
+  learnFromRows(json, askedAt);
   const tracks = collectTracks(json, new Set());
   const next = findContinuationToken(json);
   return {

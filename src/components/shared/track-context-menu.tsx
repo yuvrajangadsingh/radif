@@ -55,6 +55,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useDislikedStore } from "@/lib/store/disliked";
 import { getLikedIdsSet } from "@/components/shared/like-buttons";
 import { fetchRadio, fetchTrackAlbumId } from "@/lib/innertube/radio";
 import { fetchLikedSongs } from "@/lib/innertube/library";
@@ -179,6 +180,18 @@ export function useTrackMenuController(item: ShelfItem) {
       toast.error(`Remove failed: ${String(e)}`);
     }
   };
+  const runRemoveDislike = async () => {
+    try {
+      await removeRating(item.id);
+      // A cleared rating isn't a like either.
+      qc.setQueryData<ShelfItem[]>(["liked-songs"], (old) =>
+        (old ?? []).filter((t) => t.id !== item.id),
+      );
+      toast.success("Dislike removed");
+    } catch (e) {
+      toast.error(`Failed: ${String(e)}`);
+    }
+  };
   const runDislike = async () => {
     try {
       await dislikeTrack(item.id);
@@ -276,6 +289,7 @@ export function useTrackMenuController(item: ShelfItem) {
     runLike,
     runRemoveRating,
     runDislike,
+    runRemoveDislike,
     runAddToPlaylist,
     runRemoveFromPlaylist,
     primeUserPlaylists,
@@ -317,6 +331,7 @@ export function TrackMenuItems({
     runLike,
     runRemoveRating,
     runDislike,
+    runRemoveDislike,
     runAddToPlaylist,
     runRemoveFromPlaylist,
     primeUserPlaylists,
@@ -324,6 +339,7 @@ export function TrackMenuItems({
   } = controller;
 
   const artist = item.artists?.find((a) => !!a.id);
+  const disliked = useDislikedStore((s) => !!s.ids[item.id]);
 
   // Home cards ship no album anywhere in their payload, so fall back to a
   // /next lookup. Menu content only mounts while the menu is open, so this
@@ -389,10 +405,17 @@ export function TrackMenuItems({
           Add to liked
         </Item>
       )}
-      <Item onSelect={runDislike}>
-        <ThumbsDownIcon />
-        Not interested
-      </Item>
+      {disliked ? (
+        <Item onSelect={runRemoveDislike}>
+          <ThumbsDownIcon className="fill-current" />
+          Remove dislike
+        </Item>
+      ) : (
+        <Item onSelect={runDislike}>
+          <ThumbsDownIcon />
+          Not interested
+        </Item>
+      )}
 
       <Sub>
         <SubTrigger

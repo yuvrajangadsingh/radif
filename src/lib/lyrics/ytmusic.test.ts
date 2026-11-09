@@ -16,7 +16,7 @@ vi.mock("@/lib/innertube/shared", () => ({ rawNext: vi.fn() }));
 
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { rawNext } from "@/lib/innertube/shared";
-import { fetchYtMusicLyrics } from "./ytmusic";
+import { fetchYtMusicLyrics, readLikeStatus } from "./ytmusic";
 
 const fetchMock = vi.mocked(tauriFetch);
 const nextMock = vi.mocked(rawNext);
@@ -321,5 +321,22 @@ describe("YouTube Music lyrics", () => {
     const pending = fetchYtMusicLyrics("J7p4bzqLvCw", controller.signal);
     controller.abort(new Error("lyrics fetch timed out"));
     await expect(pending).rejects.toThrow(/timed out/);
+  });
+});
+
+describe("readLikeStatus", () => {
+  // Where /next put it on Nov 10, 2026.
+  const next = (likeStatus: string) => ({
+    playerOverlays: {
+      playerOverlayRenderer: {
+        actions: [{ likeButtonRenderer: { likeStatus } }],
+      },
+    },
+  });
+
+  it("reads the listener's rating of the video", () => {
+    expect(readLikeStatus(next("DISLIKE"))).toBe("DISLIKE");
+    expect(readLikeStatus(next("INDIFFERENT"))).toBe("INDIFFERENT");
+    expect(readLikeStatus({})).toBeUndefined();
   });
 });
