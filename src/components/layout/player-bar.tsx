@@ -683,6 +683,14 @@ export type PlayerBarVariant = "right" | "floating";
 
 const COMPACT_PLAYER_CONTROLS_WIDTH = 336;
 
+/** The right card's cover (or video) square, capped by the window height so
+ *  the title, progress, controls and bottom row still fit at the 600 pt
+ *  minimum. Below the square the card holds about 300px of fixed rows
+ *  (the title bar and inset 44, padding and gaps 64, title 44, progress 50,
+ *  transport 40, bottom row 56), and 80 more keeps a few lyric lines. A
+ *  tall window leaves the square at full card width, as before. */
+const RIGHT_SQUARE_FIT = "mx-auto max-w-[max(8rem,calc(100dvh_-_23.75rem))]";
+
 /** Album art with its drag handle and the video-startup hold loader.
  *  Extracted from PlayerBar's cover branch; video tracks never reach
  *  this — the persistent hoisted surface owns those frames. */
@@ -705,6 +713,7 @@ function CoverArt({
       className={cn(
         "mx-auto w-full touch-none select-none",
         variant === "floating" && "max-w-[20rem]",
+        variant === "right" && RIGHT_SQUARE_FIT,
         variant !== "floating" && "cursor-grab active:cursor-grabbing",
       )}
     >
@@ -886,7 +895,10 @@ export function PlayerBar({
           <div
             className={cn(
               !queueOpen &&
-                "pointer-events-none flex aspect-square w-full items-center justify-center",
+                cn(
+                  "pointer-events-none flex aspect-square w-full items-center justify-center",
+                  RIGHT_SQUARE_FIT,
+                ),
             )}
           >
             <div className="relative aspect-video w-full">
