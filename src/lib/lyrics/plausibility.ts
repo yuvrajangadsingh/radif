@@ -114,3 +114,71 @@ export function rejectSiteChrome(source: string) {
     return null;
   };
 }
+
+/**
+ * Do these plain lyrics belong to another song?
+ *
+ * 2026-11-09, "These Boots Are Made For Walkin'" (Nancy Sinatra, live on Ed
+ * Sullivan, GM1kzbAgo_E): YouTube Music's own lyrics for that video are
+ * another song's ("Staring at the lonely avenue"), so a videoId-keyed lookup
+ * can be wrong too. No lyrics beats another song's, as with artist-less
+ * tracks, so the cost of a wrong call is a blank panel; the rule is narrow
+ * for that reason. Plain text only, Latin letters only, and the title needs
+ * three words of four letters or more (past a few fillers) of which none
+ * shows up in the words. A title word matches a sung word that starts with
+ * its first five letters, so romanized spellings and dropped endings still
+ * match (udeek and udeekdian, goin and going), and a two-word title that's
+ * never sung (Bohemian Rhapsody) is left alone.
+ */
+const TITLE_FILLER = new Set([
+  "that",
+  "this",
+  "these",
+  "those",
+  "with",
+  "from",
+  "your",
+  "what",
+  "when",
+  "have",
+  "just",
+  "into",
+  "feat",
+]);
+
+export function offTitle(title: string, text: string): boolean {
+  const [t, l] = [title, text].map((x) =>
+    x.normalize("NFD").replace(/\p{M}/gu, ""),
+  );
+  if (/(?!\p{Script=Latin})\p{L}/u.test(t + l)) return false;
+  // "(2011 Remaster)", "[Live]", "- Radio Edit" name the recording, not
+  // the song, so they don't count toward the three words. A bracket left
+  // over means a title too odd to judge.
+  let song = t;
+  for (let prev = ""; prev !== song;) {
+    prev = song;
+    song = song.replace(/[([][^()[\]]*[)\]]/g, " ");
+  }
+  if (/[()[\]]/.test(song)) return false;
+  const main = (x: string) =>
+    x
+      .toLowerCase()
+      .split(/[^a-z]+/)
+      .filter((w) => w.length >= 4 && !TITLE_FILLER.has(w));
+  if (main(song.split(/\s[-\u2013\u2014]\s/)[0]).length < 3) return false;
+  // Any title word may be the sung one, the labels included.
+  const titleWords = main(t);
+  const sung = l.toLowerCase().split(/[^a-z]+/);
+  return !titleWords.some((w) => sung.some((s) => s.startsWith(w.slice(0, 5))));
+}
+
+export function rejectOffTitle(source: string, title: string | undefined) {
+  return (lyrics: Lyrics | null): Lyrics | null => {
+    if (!lyrics || lyrics.kind !== "plain" || !title) return lyrics;
+    if (!offTitle(title, lyrics.text)) return lyrics;
+    appLog(
+      `lyrics from ${source} rejected: none of the title's main words in them, likely another song's`,
+    );
+    return null;
+  };
+}
