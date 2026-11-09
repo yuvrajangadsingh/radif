@@ -321,6 +321,8 @@ function spell(a: Akshara[], s: Script): string {
     // meri, tu). Tamil keeps them.
     let vowel = x.vowel;
     const nasalEnd = end && x.nasal && s.schwaDeletion;
+    // हुँ is a common spelling of हूँ, said and typed the same (hoon).
+    if (nasalEnd && vowel === "u" && s === DEVANAGARI) vowel = "oo";
     // A long ee before a bare aa is typed iya (kaaliyan, gaddiyan).
     const iya = (y?: Akshara) =>
       s.schwaDeletion && !y?.consonant && y?.vowel === "aa";
