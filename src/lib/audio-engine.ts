@@ -666,8 +666,13 @@ export function useAudioEngine() {
   // row removed or moved). Everything below that means "this queue slot"
   // keys on it, so editing the queue around a song never reloads it.
   const slotRef = useRef<PlayingSlot>({ entry: track, index, videoId, id: 0 });
+  const prevSlot = slotRef.current.id;
   slotRef.current = followSlot(slotRef.current, track, index, videoId, loaded);
   const slot = slotRef.current.id;
+  // The old song's length is not this one's. Left in place, the next row's
+  // metadata re-clamped against it and the clock kept the previous length
+  // when this song never loaded (the stop after repeated failures).
+  if (slot !== prevSlot) rawElDurationRef.current = 0;
 
   // Substitute the streaming videoId via the user's per-track source
   // preference (Song ↔ Music Video). Subscribing here means the effect
@@ -755,7 +760,15 @@ export function useAudioEngine() {
     metaReferenceRef.current = metaReference;
   }, [metaReference]);
   useEffect(() => {
-    if (!metaReference || !rawElDurationRef.current) return;
+    if (!metaReference) return;
+    if (!rawElDurationRef.current) {
+      // Nothing loaded yet (or never will, after a failure): the listed
+      // length is all there is.
+      if (!usePlaybackStore.getState().duration) {
+        usePlaybackStore.getState().setDuration(metaReference);
+      }
+      return;
+    }
     usePlaybackStore
       .getState()
       .setDuration(correctedDuration(metaReference, rawElDurationRef.current));
