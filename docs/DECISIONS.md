@@ -9,6 +9,28 @@ time; they are quoted, not rounded up.
 
 ---
 
+## 2026-11-10 · One feature per release, 1.0.0 is the launch
+
+**Decided:** features ship one per release as QA passes, at least two days
+apart; 1.0.0 is crossfade and gapless plus the launch; 0.8.0 is fixes only,
+Thursday November 12.
+
+- 0.8.0 is cut from develop at 192898b (the commit QA rounds 11 and 12 tested)
+  on `release/0.8.0`. A fix for it lands there and is merged back.
+- After it, ListenBrainz scrobbling, skipping disliked songs and a `radif://`
+  URL scheme each get their own minor release, in the order they pass QA.
+  Each is one self-contained change, so develop can be released after any
+  one of them; one that isn't ready stays behind a setting that is off and
+  not shown.
+- 1.0.0 leads with crossfade and gapless playback, and its announcement
+  covers everything listeners have asked for that the app now has.
+
+**Why:** one feature per release gives each one time with real users before
+the next, and a broken release names its own cause. Shipping them together as
+one 0.9.0 was the first plan and was dropped the same night.
+
+---
+
 ## 2026-11-09 · QA findings left for 0.8 (round 5)
 
 **Decided:** not in 0.7.0 (the M4's call on QA round 5, which said ship;
