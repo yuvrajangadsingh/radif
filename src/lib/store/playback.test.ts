@@ -473,3 +473,46 @@ describe("shuffle after Play next", () => {
     expect(s.index).toBe(1);
   });
 });
+
+describe("Undo after Clear queue (QA r9)", () => {
+  it("puts the queue back where it was, paused or playing", () => {
+    const queue = [track("a"), track("b"), track("c")];
+    for (const playing of [false, true]) {
+      setup({
+        queue,
+        index: 1,
+        position: 6.7,
+        playing,
+        queueContinuation: "t",
+      });
+      usePlaybackStore.getState().clearQueue();
+      expect(usePlaybackStore.getState().queue).toHaveLength(0);
+      usePlaybackStore.getState().undoClear();
+      const s = usePlaybackStore.getState();
+      expect(s.queue).toBe(queue);
+      expect(s.index).toBe(1);
+      expect(s.playing).toBe(playing);
+      expect(s.position).toBe(6.7);
+      expect(s.resumeAt).toEqual({ videoId: "b", seconds: 6.7 });
+      expect(s.queueContinuation).toBe("t");
+      expect(s.cleared).toBeUndefined();
+    }
+  });
+
+  it("drops a seek meant for what played since the clear", () => {
+    setup({ queue: [track("a")], index: 0, position: 73, playing: false });
+    usePlaybackStore.getState().clearQueue();
+    usePlaybackStore.getState().playNow(track("b"));
+    usePlaybackStore.setState({ pendingSeek: 20 });
+    usePlaybackStore.getState().undoClear();
+    const s = usePlaybackStore.getState();
+    expect(s.pendingSeek).toBeUndefined();
+    expect(s.resumeAt).toEqual({ videoId: "a", seconds: 73 });
+  });
+
+  it("does nothing without a clear to undo", () => {
+    setup({ queue: [track("a")], index: 0, cleared: undefined });
+    usePlaybackStore.getState().undoClear();
+    expect(usePlaybackStore.getState().queue).toHaveLength(1);
+  });
+});
