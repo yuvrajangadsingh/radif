@@ -307,6 +307,13 @@ function spell(a: Akshara[], s: Script): string {
     // meri, tu). Tamil keeps them.
     let vowel = x.vowel;
     const nasalEnd = end && x.nasal && s.schwaDeletion;
+    // A long ee before a bare aa is typed iya (kaaliyan, gaddiyan).
+    const iya = (y?: Akshara) =>
+      s.schwaDeletion && !y?.consonant && y?.vowel === "aa";
+    const beforeIya = vowel === "ee" && iya(a[i + 1]);
+    const afterIya = a[i - 1]?.vowel === "ee" && iya(x);
+    if (beforeIya) vowel = "i";
+    if (afterIya) out += "y";
     // A bare e after a short vowel is said with a y glide (liye, gaye, huye);
     // after a long one it stays as written (jaae).
     const glide =
@@ -324,7 +331,8 @@ function spell(a: Akshara[], s: Script): string {
     // does an oo in Devanagari (hoon, yoon). Gurmukhi's nasal u is typed short
     // (saanu).
     const keepsLength =
-      nasalEnd && (vowel === "aa" || (vowel === "oo" && s === DEVANAGARI));
+      nasalEnd &&
+      ((vowel === "aa" && !afterIya) || (vowel === "oo" && s === DEVANAGARI));
     if (end && s.schwaDeletion && !keepsLength) {
       vowel = { aa: "a", ee: "i", oo: "u" }[vowel] ?? vowel;
     }
