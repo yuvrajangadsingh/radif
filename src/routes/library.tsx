@@ -1,9 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createFileRoute } from "@tanstack/react-router";
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import {
+  useInfiniteQuery,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { AlertCircleIcon, Loader2Icon, LogInIcon } from "lucide-react";
 import { AnimatedTabs } from "@/components/ui/animated-tabs";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ShelfCard } from "@/components/shared/shelf-card";
 import { TrackList } from "@/components/shared/track-list";
@@ -14,11 +19,19 @@ import {
   type LibrarySection,
 } from "@/lib/innertube/library";
 import {
+  fetchUserPlaylists,
+  type UserPlaylist,
+} from "@/lib/innertube/mutations";
+import type { ShelfItem } from "@/lib/innertube/types";
+import { trackMatches } from "@/lib/track-match";
+import {
+  fetchPlaylist,
   fetchPlaylistContinuation,
   fetchPlaylistFirstPage,
   type PlaylistFirstPage,
   type PlaylistNextPage,
 } from "@/lib/innertube/playlist";
+import { useAccounts } from "@/lib/store/accounts";
 import { authLoggedInQuery } from "@/lib/store/auth-queries";
 import { openSettings } from "@/lib/store/settings-dialog";
 
@@ -50,10 +63,13 @@ function LibraryPage() {
       />
       <div className="pt-2">
         {tab === "playlists" && (
-          <SectionsView
-            queryKey={["library", "playlists"]}
-            fetcher={fetchLibraryPlaylists}
-          />
+          <div className="flex flex-col gap-6">
+            <PlaylistSearch />
+            <SectionsView
+              queryKey={["library", "playlists"]}
+              fetcher={fetchLibraryPlaylists}
+            />
+          </div>
         )}
         {tab === "songs" && <LikedSongsView />}
         {tab === "albums" && (
@@ -69,6 +85,191 @@ function LibraryPage() {
           />
         )}
       </div>
+    </div>
+  );
+}
+
+type SongSearch = {
+  query: string;
+  done: number;
+  total: number;
+  failed: number;
+  hits: { playlist: UserPlaylist; tracks: ShelfItem[] }[];
+};
+
+// Rows shown per playlist; the rest are a click away on the playlist itself.
+const HITS_SHOWN = 50;
+// How long a playlist loaded whole for search is reused.
+const WHOLE_STALE_MS = 10 * 60_000;
+const LIKED: UserPlaylist = { id: "LM", title: "Liked Music" };
+
+/**
+ * Search your playlists: titles as you type, and on Enter the songs in all of
+ * them, Liked Music included. A playlist is loaded whole the first time
+ * (`fetchPlaylist`), one after another a beat apart, and kept in memory for
+ * the next search, per account. One that fails is passed over and counted.
+ *
+ * ponytail: fetchPlaylist keeps what it got when a later page fails, so a
+ * playlist can be searched in part without saying so, and nothing backs off
+ * on a 429. Surface both if big libraries hit them.
+ */
+function PlaylistSearch() {
+  const qc = useQueryClient();
+  const account = useAccounts().data?.find((a) => a.isActive)?.id;
+  const accountRef = useRef(account);
+  accountRef.current = account;
+  const playlists = useQuery({
+    queryKey: ["user-playlists"],
+    queryFn: () => fetchUserPlaylists(),
+  });
+  const [text, setText] = useState("");
+  const wanted = text.trim().toLowerCase();
+  const titleHits = wanted
+    ? (playlists.data ?? []).filter((p) =>
+        p.title.toLowerCase().includes(wanted),
+      )
+    : [];
+  const [songs, setSongs] = useState<SongSearch | null>(null);
+  // A newer search, or leaving the page, stops the one running.
+  const runRef = useRef(0);
+  useEffect(
+    () => () => {
+      runRef.current++;
+    },
+    [],
+  );
+
+  const searchSongs = async () => {
+    if (!wanted || !account || !playlists.isSuccess) return;
+    const list = [LIKED, ...(playlists.data ?? [])];
+    const run = ++runRef.current;
+    // An older search's loads carry its stop check; start them fresh.
+    await qc.cancelQueries({ queryKey: ["playlist-full"] });
+    if (runRef.current !== run) return;
+    // A newer search, leaving the page, or an account switch ends this one.
+    const stale = () =>
+      runRef.current !== run || accountRef.current !== account;
+    setSongs({
+      query: wanted,
+      done: 0,
+      total: list.length,
+      failed: 0,
+      hits: [],
+    });
+    let fetched = false;
+    for (const [i, playlist] of list.entries()) {
+      const key = ["playlist-full", account, playlist.id];
+      const state = qc.getQueryState(key);
+      const cached =
+        state?.data !== undefined &&
+        !state.isInvalidated &&
+        Date.now() - state.dataUpdatedAt < WHOLE_STALE_MS;
+      // A beat between network loads only; a cached playlist answers at once.
+      if (!cached && fetched) await new Promise((r) => setTimeout(r, 250));
+      if (!cached) fetched = true;
+      if (stale()) return;
+      let tracks: ShelfItem[] = [];
+      let failed = 0;
+      try {
+        const page = await qc.fetchQuery({
+          queryKey: key,
+          queryFn: () => fetchPlaylist(playlist.id, stale),
+          staleTime: WHOLE_STALE_MS,
+        });
+        tracks = page.tracks.filter((t) => trackMatches(t, wanted));
+      } catch {
+        failed = 1;
+      }
+      if (stale()) return;
+      setSongs(
+        (s) =>
+          s && {
+            ...s,
+            done: i + 1,
+            failed: s.failed + failed,
+            hits: tracks.length ? [...s.hits, { playlist, tracks }] : s.hits,
+          },
+      );
+    }
+  };
+
+  const searching = songs && songs.done < songs.total;
+  return (
+    <div className="flex flex-col gap-4">
+      <form
+        className="flex max-w-xl items-center gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void searchSongs();
+        }}
+      >
+        <Input
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="Search your playlists"
+          aria-label="Search your playlists"
+        />
+        <Button
+          type="submit"
+          variant="outline"
+          disabled={!wanted || !playlists.isSuccess}
+        >
+          Search songs
+        </Button>
+      </form>
+      {playlists.isError ? (
+        <span className="text-sm text-muted-foreground">
+          Couldn't load your playlists to search them.
+        </span>
+      ) : null}
+      {titleHits.length > 0 ? (
+        <div className="flex flex-wrap gap-2">
+          {titleHits.map((p) => (
+            <Button key={p.id} variant="secondary" size="sm" asChild>
+              <Link to="/playlist/$id" params={{ id: p.id }}>
+                {p.title}
+              </Link>
+            </Button>
+          ))}
+        </div>
+      ) : null}
+      {songs ? (
+        <div className="flex flex-col gap-6">
+          <span className="flex items-center gap-2 text-sm text-muted-foreground">
+            {searching ? (
+              <Loader2Icon className="size-3.5 animate-spin" />
+            ) : null}
+            {searching
+              ? `Searching your playlists, ${songs.done} of ${songs.total}`
+              : songs.hits.length === 0
+                ? `No songs matching "${songs.query}" in your playlists.`
+                : `Songs matching "${songs.query}"`}
+            {songs.failed > 0
+              ? ` (${songs.failed} ${songs.failed === 1 ? "playlist" : "playlists"} couldn't be searched)`
+              : null}
+          </span>
+          {songs.hits.map(({ playlist, tracks }) => (
+            <section key={playlist.id} className="flex flex-col gap-2">
+              <Link
+                to="/playlist/$id"
+                params={{ id: playlist.id }}
+                className="text-sm font-semibold hover:underline"
+              >
+                {playlist.title}
+              </Link>
+              <TrackList
+                tracks={tracks.slice(0, HITS_SHOWN)}
+                virtualize={false}
+              />
+              {tracks.length > HITS_SHOWN ? (
+                <span className="text-sm text-muted-foreground">
+                  {tracks.length - HITS_SHOWN} more in this playlist
+                </span>
+              ) : null}
+            </section>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

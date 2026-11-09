@@ -434,12 +434,16 @@ export async function fetchPlaylistContinuation(
  * list (e.g. the liked-songs membership cache used to decide whether a
  * track shows a filled thumb-up), not for UI rendering of long lists.
  */
-export async function fetchPlaylist(id: string): Promise<PlaylistPage> {
+export async function fetchPlaylist(
+  id: string,
+  /** Checked before each further page: true stops the walk there. */
+  shouldStop?: () => boolean,
+): Promise<PlaylistPage> {
   const first = await fetchPlaylistFirstPage(id);
   const tracks = [...first.tracks];
   const seenIds = new Set(tracks.map((t) => t.id));
   let token = first.continuationToken;
-  for (let i = 0; token && i < 200; i++) {
+  for (let i = 0; token && i < 200 && !shouldStop?.(); i++) {
     let page: PlaylistNextPage;
     try {
       page = await fetchPlaylistContinuation(token);
@@ -459,6 +463,9 @@ export async function fetchPlaylist(id: string): Promise<PlaylistPage> {
     if (tracks.length === before) break;
     token = page.continuationToken;
   }
+  // Stopped part way: not a whole playlist, so don't hand back (and let a
+  // cache keep) one that looks like it.
+  if (token && shouldStop?.()) throw new Error("playlist load stopped");
   if (import.meta.env.DEV) {
     console.debug("[playlist] full-load parsed:", id, "tracks=", tracks.length);
   }

@@ -107,6 +107,11 @@ export function LikeDislikeButtons({
       // those stale so they don't keep showing an outdated list. They're
       // heavy infinite queries, so invalidate only refetches if mounted.
       void qc.invalidateQueries({ queryKey: ["library", "liked-songs-pages"] });
+      // Library's search across playlists holds Liked Music whole.
+      qc.removeQueries({
+        predicate: (q) =>
+          q.queryKey[0] === "playlist-full" && q.queryKey[2] === "LM",
+      });
       void qc.invalidateQueries({
         predicate: (q) =>
           q.queryKey[0] === "playlist-pages-v2" &&
