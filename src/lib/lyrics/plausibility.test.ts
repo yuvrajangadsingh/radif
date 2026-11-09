@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   looksLikeSiteChrome,
   offTitle,
-  rejectOffTitle,
+  markOffTitle,
   rejectSiteChrome,
 } from "@/lib/lyrics/plausibility";
 
@@ -216,19 +216,21 @@ describe("offTitle", () => {
     expect(offTitle(BOOTS, `${WRONG}\nCafe\u0301`)).toBe(true);
   });
 
-  it("rejects only plain lyrics", () => {
-    const reject = rejectOffTitle("YouTube Music", BOOTS);
-    expect(reject({ kind: "plain", text: WRONG })).toBeNull();
+  it("marks only plain lyrics, and keeps them", () => {
+    const mark = markOffTitle("YouTube Music", BOOTS);
+    expect(mark({ kind: "plain", text: WRONG })).toEqual({
+      kind: "plain",
+      text: WRONG,
+      offTitle: true,
+    });
     const timed = {
       kind: "timed" as const,
       lines: [{ start: 0, text: "Staring at the lonely avenue" }],
     };
-    expect(reject(timed as never)).toBe(timed);
-    expect(
-      rejectOffTitle(
-        "YouTube Music",
-        undefined,
-      )({ kind: "plain", text: WRONG }),
-    ).not.toBeNull();
+    expect(mark(timed as never)).toBe(timed);
+    const right = { kind: "plain" as const, text: "These boots are made" };
+    expect(mark(right)).toBe(right);
+    const untitled = { kind: "plain" as const, text: WRONG };
+    expect(markOffTitle("YouTube Music", undefined)(untitled)).toBe(untitled);
   });
 });

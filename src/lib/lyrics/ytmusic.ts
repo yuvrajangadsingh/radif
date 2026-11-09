@@ -11,7 +11,7 @@ import { LyricsHttpError } from "@/lib/lyrics/errors";
  * title/artist string, which is why `sources.ts` does NOT gate it on the
  * `verifiable` (artist-known) check the other providers need. It can still
  * hand back another song's words: YTM attached the wrong lyrics to a live
- * video once (see `rejectOffTitle` in plausibility.ts).
+ * video once (see `markOffTitle` in plausibility.ts).
  *
  * Two hops:
  *   1. `/next` with the videoId returns the watch page's tabs. One of them
