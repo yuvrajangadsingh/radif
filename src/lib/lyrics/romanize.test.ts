@@ -50,6 +50,10 @@ describe("romanize", () => {
     expect(romanize("தமிழ்க் கவிதை")).toBe("thamizhk kavidhai");
     expect(romanize("சேர்தல்")).toBe("serthal");
     expect(romanize("வளர்பிறை")).toBe("valarpirai");
+    expect(romanize("கார்குழல்")).toBe("kaarkuzhal");
+    expect(romanize("கார்காலம்")).toBe("kaarkaalam");
+    expect(romanize("மலர்கொடி")).toBe("malarkodi");
+    expect(romanize("மார்கழி")).toBe("maargazhi");
     expect(romanize("பார்க்க")).toBe("paarkka");
     expect(romanize("வாழ்க்கை")).toBe("vaazhkkai");
   });
