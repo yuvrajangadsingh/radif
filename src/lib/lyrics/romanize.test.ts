@@ -180,6 +180,14 @@ describe("romanize", () => {
     expect(romanize("कोई")).toBe("koi");
   });
 
+  it("spells a long ee before a bare aa as iya (N3)", () => {
+    expect(romanize("ਕਾਲੀਆਂ ਗੱਡੀਆਂ")).toBe("kaaliyan gaddiyan");
+    expect(romanize("ਕੁੜੀਆਂ")).toBe("kuriyan");
+    expect(romanize("ਸਾਰੀਆਂ")).toBe("saariyan");
+    expect(romanize("ਪਿਆਰ")).toBe("piaar");
+    expect(romanize("ਜਾਨਾਂ")).toBe("jaanaan");
+  });
+
   it("keeps other text in a mixed line", () => {
     expect(romanize("Baby तू (ooh), 2 बार")).toBe("Baby tu (ooh), 2 baar");
   });
