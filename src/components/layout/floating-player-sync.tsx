@@ -107,6 +107,7 @@ type PlaybackAction =
   | { type: "goTo"; index: number }
   | { type: "removeAt"; index: number }
   | { type: "moveTrack"; from: number; to: number }
+  | { type: "playNextAt"; from: number }
   | { type: "clearQueue" }
   | { type: "appendToQueue"; tracks: unknown[] }
   | { type: "setAutoRadio"; on: boolean }
@@ -211,6 +212,9 @@ export function FloatingPlayerSync() {
             break;
           case "moveTrack":
             store.moveTrack(a.from, a.to);
+            break;
+          case "playNextAt":
+            store.playNextAt(a.from);
             break;
           case "clearQueue":
             store.clearQueue();

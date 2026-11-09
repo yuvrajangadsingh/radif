@@ -58,6 +58,7 @@ export function QueueBody({ onClose }: { onClose?: () => void }) {
   const toggle = usePlaybackStore((s) => s.toggle);
   const removeAt = usePlaybackStore((s) => s.removeAt);
   const moveTrack = usePlaybackStore((s) => s.moveTrack);
+  const playNextAt = usePlaybackStore((s) => s.playNextAt);
   const clearQueue = usePlaybackStore((s) => s.clearQueue);
   const setAutoRadio = usePlaybackStore((s) => s.setAutoRadio);
 
@@ -171,7 +172,7 @@ export function QueueBody({ onClose }: { onClose?: () => void }) {
               onGoTo={goTo}
               onRemoveAt={removeAt}
               onMoveTrack={moveTrack}
-              onPlayNext={(i) => moveTrack(i, index + 1)}
+              onPlayNext={playNextAt}
             />
           ) : (
             <HistoryTabBody
