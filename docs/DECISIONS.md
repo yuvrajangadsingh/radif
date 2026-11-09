@@ -9,6 +9,33 @@ time; they are quoted, not rounded up.
 
 ---
 
+## 2026-11-10 · The feature queue, from what people ask for
+
+**Decided:** one feature per release, in this order, each its own PR and its
+own QA round:
+
+1. True shuffle: shuffle the whole playlist locally instead of YouTube
+   Music's server shuffle (12 mentions).
+2. ListenBrainz scrobbling.
+3. Skip disliked songs.
+4. Search across all playlists, and a search box in Save to playlist (11).
+5. A `radif://` URL scheme for Raycast, Alfred and Shortcuts.
+6. Playlist folders in the sidebar, local only (15).
+7. Uploaded music in the library (7).
+8. An AI-music filter (8), with a design note on detecting it without
+   guessing before anything is built.
+9. 1.0.0: crossfade and gapless.
+
+A "what happens when you sign in" section goes in the README and the site
+FAQ (9 people distrust the in-app Google sign-in), with the minimum macOS.
+Last.fm in release builds waits on API keys (11 scrobbling requests, one of them for ListenBrainz).
+
+**Why:** counted from the GitHub issues and discussions and a scan of 54
+Reddit threads (1,116 comments) and 53 X posts on Nov 10. This order replaces
+the first plan from earlier the same night.
+
+---
+
 ## 2026-11-10 · One feature per release, 1.0.0 is the launch
 
 **Decided:** features ship one per release as QA passes, at least two days
