@@ -60,11 +60,44 @@ export function rateHere(
   useDislikedStore.getState().mark(videoId, disliked);
 }
 
+function learnable(videoId: string, askedAt: number): boolean {
+  if (clearedAt >= askedAt) return false;
+  if ((ratedHere.get(videoId)?.done ?? 0) >= askedAt) return false;
+  return !useDislikedStore.getState().ids[videoId];
+}
+
 /** A DISLIKE read from YouTube Music for a request sent at `askedAt`. */
 export function learnDisliked(videoId: string, askedAt: number): void {
-  if (clearedAt >= askedAt) return;
-  if ((ratedHere.get(videoId)?.done ?? 0) >= askedAt) return;
-  useDislikedStore.getState().mark(videoId, true);
+  if (learnable(videoId, askedAt)) {
+    useDislikedStore.getState().mark(videoId, true);
+  }
+}
+
+/** Every row in a YouTube Music response carries the listener's rating of
+ *  its song (a likeButtonRenderer with target.videoId and likeStatus; seen
+ *  on playlist pages, Nov 10). Learn the dislikes among them. */
+export function learnFromRows(response: unknown, askedAt: number): void {
+  const found: string[] = [];
+  const walk = (n: unknown): void => {
+    if (Array.isArray(n)) return n.forEach(walk);
+    if (!n || typeof n !== "object") return;
+    const o = n as Record<string, unknown>;
+    const b = o.likeButtonRenderer as
+      { likeStatus?: unknown; target?: { videoId?: unknown } } | undefined;
+    const id = b?.target?.videoId;
+    if (b?.likeStatus === "DISLIKE" && typeof id === "string") found.push(id);
+    Object.values(o).forEach(walk);
+  };
+  walk(response);
+  // One write for the page: each one persists the whole set.
+  const fresh = found.filter((id) => learnable(id, askedAt));
+  if (fresh.length === 0) return;
+  useDislikedStore.setState((s) => ({
+    ids: {
+      ...s.ids,
+      ...Object.fromEntries(fresh.map((id) => [id, true as const])),
+    },
+  }));
 }
 
 export function isDisliked(videoId: string): boolean {

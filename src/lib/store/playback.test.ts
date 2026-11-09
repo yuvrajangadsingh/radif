@@ -16,7 +16,7 @@ import type { PlaybackState, QueueTrack } from "@/lib/store/playback";
 
 const { usePlaybackStore, resumePoint, createThrottledStorage, noPickSince } =
   await import("@/lib/store/playback");
-const { useDislikedStore, rateHere, learnDisliked, isDisliked } =
+const { useDislikedStore, rateHere, learnDisliked, isDisliked, learnFromRows } =
   await import("@/lib/store/disliked");
 const { useSettingsStore } = await import("@/lib/store/settings");
 
@@ -643,5 +643,26 @@ describe("what the disliked set learns", () => {
     learnDisliked("z", before);
     rateHere("z", true, before);
     expect(isDisliked("z")).toBe(false);
+  });
+
+  it("reads the rating on each playlist row", () => {
+    // The shape of a playlist row's menu button, Nov 10.
+    const row = (videoId: string, likeStatus: string) => ({
+      musicResponsiveListItemRenderer: {
+        menu: {
+          menuRenderer: {
+            topLevelButtons: [
+              { likeButtonRenderer: { target: { videoId }, likeStatus } },
+            ],
+          },
+        },
+      },
+    });
+    learnFromRows(
+      { contents: [row("p1", "DISLIKE"), row("p2", "INDIFFERENT")] },
+      Date.now() + 1, // after the clear() above
+    );
+    expect(isDisliked("p1")).toBe(true);
+    expect(isDisliked("p2")).toBe(false);
   });
 });
