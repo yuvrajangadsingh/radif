@@ -93,9 +93,10 @@ const GURMUKHI = (() => {
 const TAMIL: Script = {
   consonants: {
     // The five stops are placeholders: one letter covers both sounds, and
-    // tamilVoicing picks from the neighbours.
+    // tamilVoicing picks from the neighbours. ள is L until then, so the
+    // -gal plural can be told from a ல.
     க: "K", ங: "ng", ச: "C", ஞ: "nj", ட: "T", ண: "n", த: "TH", ந: "n",
-    ப: "P", ம: "m", ய: "y", ர: "r", ல: "l", வ: "v", ழ: "zh", ள: "l",
+    ப: "P", ம: "m", ய: "y", ர: "r", ல: "l", வ: "v", ழ: "zh", ள: "L",
     ற: "R", ன: "n", ஜ: "j", ஷ: "sh", ஶ: "sh", ஸ: "s", ஹ: "h",
   },
   vowels: {
@@ -236,6 +237,8 @@ const TAMIL_WORDS: Record<string, string> = {
   கார்குழல்: "kaarkuzhal",
   கார்காலம்: "kaarkaalam",
   மலர்கொடி: "malarkodi",
+  வாழ்க: "vaazhga",
+  மார்கழி: "maargazhi",
 };
 
 const TAMIL_STOPS: Record<string, [unvoiced: string, voiced: string]> = {
@@ -249,7 +252,7 @@ const TAMIL_STOPS: Record<string, [unvoiced: string, voiced: string]> = {
 /** Tamil's stops are written once and said two ways: unvoiced at the start
  *  of a word, after another consonant, doubled or with no vowel of their own
  *  (kandu's k, akka, pattu, lakshmi), voiced after a nasal (anbe, kandu's d,
- *  pandhu, nenjam), a க after ழ் or ர் (vaazhga, malargal) and between vowels
+ *  pandhu, nenjam), the plural -kal after ழ் or ர் (malargal) and between vowels
  *  (magan, paadal). ச is j after ஞ, ch doubled (pachai, written once) or
  *  after ட் ற் (kaatchi), and s elsewhere (paasam, isai). ற் ற is
  *  tr (kaatru, vetri) and ன் ற ndr (thendral). A word-final aa is typed short
@@ -260,6 +263,10 @@ function tamilVoicing(a: Akshara[]): void {
     const prev = i > 0 ? a[i - 1] : undefined;
     const prevLatin = i > 0 ? latin[i - 1] : "";
     const cluster = !!prev && prev.vowel === "";
+    if (latin[i] === "L") {
+      x.consonant = "l";
+      return;
+    }
     if (latin[i] === "H") {
       // ஃப is f in loanwords (fan, coffee); otherwise h.
       x.consonant = latin[i + 1] === "P" ? "" : "h";
@@ -281,12 +288,14 @@ function tamilVoicing(a: Akshara[]): void {
       (cluster && prevLatin === latin[i]) ||
       (x.vowel === "" && latin[i + 1] === latin[i]);
     const afterNasal = cluster && /^(ng|nj|n|m)$/.test(prevLatin);
-    // Only க: the plural -gal and vaazhga. Other stops there are typed both
-    // ways (maarbu, but serthal, valarpirai).
+    // Only the plural -gal (malargal, uyirgale). Anywhere else a க there is
+    // mostly a compound or a loan, typed with k (nerkonda, Kargil); vaazhga
+    // and maargazhi are on the word list.
     const afterLiquid =
       cluster &&
       latin[i] === "K" &&
-      x.vowel !== "" &&
+      x.vowel === "a" &&
+      latin[i + 1] === "L" &&
       /^(zh|r)$/.test(prevLatin);
     const betweenVowels =
       !!prev && !cluster && prev.vowel !== "" && x.vowel !== "";
