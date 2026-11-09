@@ -8,10 +8,12 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { toast } from "sonner";
-import { HistoryIcon, Loader2, Unplug } from "lucide-react";
+import { AudioLinesIcon, HistoryIcon, Loader2, Unplug } from "lucide-react";
 
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { REJECTED, validateToken } from "@/lib/listenbrainz";
 import { Group, SettingRow, TabPane } from "@/components/settings/primitives";
 import { useSettingsStore } from "@/lib/store/settings";
 import { DiscordIcon, LastfmIcon } from "@/components/shared/brand-icons";
@@ -263,6 +265,139 @@ function LastfmSection() {
 }
 
 /**
+ * ListenBrainz block: paste a user token, which is checked with
+ * validate-token before it's kept. Submitting lives in `lib/listenbrainz.ts`;
+ * a token it rejects later turns submitting off and shows here.
+ */
+function ListenbrainzSection() {
+  const user = useSettingsStore((s) => s.listenbrainzUser);
+  const connected = useSettingsStore((s) => !!s.listenbrainzToken);
+  const enabled = useSettingsStore((s) => s.listenbrainzEnabled);
+  const error = useSettingsStore((s) => s.listenbrainzError);
+  const setEnabled = useSettingsStore((s) => s.setListenbrainzEnabled);
+  const connect = useSettingsStore((s) => s.setListenbrainz);
+  const disconnect = useSettingsStore((s) => s.clearListenbrainz);
+  const setError = useSettingsStore((s) => s.setListenbrainzError);
+  const [draft, setDraft] = useState("");
+  const [checking, setChecking] = useState(false);
+  // A token refused while connecting; the stored error is for one that was
+  // refused later, and only shows while that token is still connected.
+  const [refused, setRefused] = useState(false);
+  const shownError = connected ? error : refused ? REJECTED : null;
+  // The draft now, so an answer for an older one is dropped.
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+
+  const check = async () => {
+    const token = draft.trim();
+    if (!token) return;
+    setChecking(true);
+    try {
+      const name = await validateToken(token);
+      if (draftRef.current.trim() !== token) return;
+      if (!name) {
+        setRefused(true);
+        return;
+      }
+      connect(name, token);
+      setRefused(false);
+      setDraft("");
+      toast.success(`Connected to ListenBrainz as ${name}`);
+    } catch {
+      toast.error("Couldn't reach ListenBrainz. Try again in a moment.");
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  const control = connected ? (
+    <Switch
+      checked={enabled}
+      onCheckedChange={(v) => {
+        setEnabled(v);
+        if (v) setError(null);
+      }}
+      aria-label="ListenBrainz scrobbling"
+    />
+  ) : null;
+
+  return (
+    <div className="flex flex-col">
+      <SettingRow
+        icon={AudioLinesIcon}
+        title="ListenBrainz"
+        description="Send every track you play to your ListenBrainz profile, with a user token from listenbrainz.org/settings."
+        control={control}
+      />
+      <div className="flex flex-col gap-2 pb-4 pl-12">
+        {connected ? (
+          <div className="flex items-center gap-3 rounded-lg border border-border/60 bg-surface px-3 py-2.5">
+            <div className="flex min-w-0 flex-1 flex-col">
+              <span className="truncate text-sm font-semibold leading-tight">
+                {user ?? "ListenBrainz"}
+              </span>
+              {user ? (
+                <span className="truncate text-xs text-muted-foreground">
+                  listenbrainz.org/user/{user}
+                </span>
+              ) : null}
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                disconnect();
+                setRefused(false);
+                toast.success("Disconnected from ListenBrainz");
+              }}
+            >
+              <Unplug className="size-3.5" />
+              Disconnect
+            </Button>
+          </div>
+        ) : (
+          <form
+            className="flex items-center gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void check();
+            }}
+          >
+            <Input
+              type="password"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="User token"
+              aria-label="ListenBrainz user token"
+              value={draft}
+              onChange={(e) => {
+                setDraft(e.target.value);
+                setRefused(false);
+                setError(null);
+              }}
+            />
+            <Button
+              type="submit"
+              variant="outline"
+              size="sm"
+              disabled={!draft.trim() || checking}
+            >
+              {checking ? <Loader2 className="size-3.5 animate-spin" /> : null}
+              Connect
+            </Button>
+          </form>
+        )}
+        {shownError ? (
+          <span role="alert" className="text-[13px] text-destructive">
+            {shownError}
+          </span>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/**
  * Integrations tab: third-party services Radif can broadcast to.
  * Discord Rich Presence and Last.fm scrobbling both react to the same
  * now-playing state, mirrored out over their own backends.
@@ -304,6 +439,7 @@ export function IntegrationsTab() {
         />
       </Group>
       <LastfmSection />
+      <ListenbrainzSection />
     </TabPane>
   );
 }

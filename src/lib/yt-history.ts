@@ -33,6 +33,11 @@ import { resolveStreamId, useTrackSourceStore } from "@/lib/store/track-source";
 // A listen counts after this much real playback, or half of a shorter track.
 const LISTEN_SECONDS = 30;
 
+type WatchOptions = {
+  capSeconds?: number;
+  onStart?: (startedAtMs: number) => void;
+};
+
 const CPN_ALPHABET =
   "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_";
 
@@ -88,8 +93,15 @@ export function heardBetween(moved: number, elapsed: number): number {
  * Watches the track that is current when it is called and gives up the
  * moment another one takes the slot: that update already carries the next
  * track's duration, and the effect that owns this has not cleaned up yet.
+ *
+ * A listen is half the track or `capSeconds`, whichever is less (30 for
+ * YouTube history, 240 for ListenBrainz). `onStart` is called once, with the
+ * wall-clock ms the audio started, when the playhead first moves.
  */
-export function watchListen(onListen: () => void): () => void {
+export function watchListen(
+  onListen: () => void,
+  { capSeconds = LISTEN_SECONDS, onStart }: WatchOptions = {},
+): () => void {
   let heard = 0;
   let at = Date.now();
   const { index, queue, position: startedAt } = usePlaybackStore.getState();
@@ -119,12 +131,14 @@ export function watchListen(onListen: () => void): () => void {
     // packet that resumes a cast earns nothing. Flag seeks in the store and
     // apply a receiver packet in one update if either ever matters.
     if (s.playing) {
+      const before = heard;
       heard += heardBetween(s.position - position, (now - at) / 1000);
+      if (before === 0 && heard > 0) onStart?.(now - heard * 1000);
     }
     at = now;
     position = s.position;
     const half = s.duration > 0 ? s.duration / 2 : Infinity;
-    if (heard < Math.min(LISTEN_SECONDS, half)) return;
+    if (heard < Math.min(capSeconds, half)) return;
     stop();
     onListen();
   });

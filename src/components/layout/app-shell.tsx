@@ -29,6 +29,7 @@ import { useCacheAutoClean } from "@/lib/cache-cleanup";
 import { usePlaybackNotifications } from "@/lib/playback-notifications";
 import { useNotchPeek } from "@/lib/notch";
 import { useLastfmScrobbler } from "@/lib/lastfm-scrobbler";
+import { useListenbrainzScrobbler } from "@/lib/listenbrainz";
 import { useYtHistory } from "@/lib/yt-history";
 import { useSleepTimerEngine } from "@/lib/sleep-timer";
 import { useYtdlpSetup } from "@/lib/ytdlp";
@@ -109,6 +110,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   usePlaybackNotifications();
   useNotchPeek();
   useLastfmScrobbler();
+  useListenbrainzScrobbler();
   useYtHistory();
   useSleepTimerEngine();
   const mode = useLayoutStore((s) => s.mode);
