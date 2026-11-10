@@ -461,10 +461,15 @@ export function TrackMenuItems({
         </Item>
       ))}
       {toHide.length === 1 ? (
-        <Item onSelect={() => hideArtist(toHide[0])}>
+        <Item
+          onSelect={() => hideArtist(toHide[0])}
+          title={toHide[0].name}
+          className="whitespace-nowrap"
+        >
           <UserXIcon />
-          Hide this artist
-          <span className="ml-auto max-w-32 truncate pl-3 text-xs text-muted-foreground">
+          <span className="shrink-0">Hide this artist</span>
+          {/* One line: a long name ends in an ellipsis, full in the tooltip. */}
+          <span className="ml-auto min-w-0 max-w-32 truncate pl-3 text-xs text-muted-foreground">
             {toHide[0].name}
           </span>
         </Item>
@@ -476,7 +481,7 @@ export function TrackMenuItems({
           </SubTrigger>
           <SubContent>
             {toHide.map((a) => (
-              <Item key={a.id} onSelect={() => hideArtist(a)}>
+              <Item key={a.id} onSelect={() => hideArtist(a)} title={a.name}>
                 <span className="max-w-48 truncate">{a.name || a.id}</span>
               </Item>
             ))}
