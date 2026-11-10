@@ -10,6 +10,18 @@ export type PinnedPlaylist = {
   thumbnailUrl?: string;
 };
 
+/** Sidebar folders ship hidden until QA passes them. Delete in the
+ *  release that ships them. */
+export const FOLDERS_SHIPPED = false;
+
+/** A local sidebar folder. One level: it holds playlists, not folders. */
+export type PlaylistFolder = {
+  id: string;
+  name: string;
+  playlistIds: string[];
+  collapsed: boolean;
+};
+
 // Bucket sentinel for pre-multi-account pins. Real account ids start
 // with `acct-` from `generate_account_id`, so the `__legacy__` key
 // can't collide.
@@ -44,13 +56,39 @@ type State = {
    * always in exactly one of {pinned, normal, hidden}.
    */
   hiddenByAccount: Record<string, string[]>;
+  /**
+   * Sidebar folders keyed by account. Local only. A playlist is in at most
+   * one place: pinned, in one folder, unfiled, or hidden. Moving it into a
+   * folder unpins and unhides it; pinning or hiding takes it out. An id
+   * the library no longer has just doesn't show, and comes back in place
+   * if the playlist does (a partial library fetch, say).
+   */
+  foldersByAccount: Record<string, PlaylistFolder[]>;
   setActiveAccount: (id: string | null) => void;
   pin: (p: PinnedPlaylist) => void;
   unpin: (id: string) => void;
   hide: (id: string) => void;
   unhide: (id: string) => void;
   reorder: (from: number, to: number) => void;
+  /** New folder, optionally holding `playlistId`; returns its id (or null
+   *  when signed out). */
+  createFolder: (name: string, playlistId?: string) => string | null;
+  renameFolder: (folderId: string, name: string) => void;
+  /** Its playlists go back to unfiled. */
+  deleteFolder: (folderId: string) => void;
+  moveToFolder: (playlistId: string, folderId: string) => void;
+  removeFromFolder: (playlistId: string) => void;
+  toggleFolder: (folderId: string) => void;
 };
+
+const withoutPlaylist = (folders: PlaylistFolder[], id: string) =>
+  folders.some((f) => f.playlistIds.includes(id))
+    ? folders.map((f) =>
+        f.playlistIds.includes(id)
+          ? { ...f, playlistIds: f.playlistIds.filter((x) => x !== id) }
+          : f,
+      )
+    : folders;
 
 /**
  * Local pinned-playlist registry. Persisted in localStorage so the
@@ -61,10 +99,11 @@ type State = {
  */
 export const usePinnedPlaylistsStore = create<State>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       activeAccountId: null,
       byAccount: {},
       hiddenByAccount: {},
+      foldersByAccount: {},
       setActiveAccount: (id) =>
         set((s) => {
           const next = { ...s.byAccount };
@@ -95,9 +134,14 @@ export const usePinnedPlaylistsStore = create<State>()(
           const hidden = s.hiddenByAccount[key] ?? [];
           const wasHidden = hidden.includes(p.id);
           const alreadyPinned = list.some((x) => x.id === p.id);
+          const folders = s.foldersByAccount[key] ?? [];
+          const inFolder = folders.some((f) => f.playlistIds.includes(p.id));
           // No-op only when there's genuinely nothing to change.
-          if (alreadyPinned && !wasHidden) return s;
+          if (alreadyPinned && !wasHidden && !inFolder) return s;
           return {
+            foldersByAccount: inFolder
+              ? { ...s.foldersByAccount, [key]: withoutPlaylist(folders, p.id) }
+              : s.foldersByAccount,
             byAccount: alreadyPinned
               ? s.byAccount
               : { ...s.byAccount, [key]: [...list, p] },
@@ -115,8 +159,13 @@ export const usePinnedPlaylistsStore = create<State>()(
           const list = s.byAccount[key] ?? [];
           const alreadyHidden = hidden.includes(id);
           const wasPinned = list.some((x) => x.id === id);
-          if (alreadyHidden && !wasPinned) return s;
+          const folders = s.foldersByAccount[key] ?? [];
+          const inFolder = folders.some((f) => f.playlistIds.includes(id));
+          if (alreadyHidden && !wasPinned && !inFolder) return s;
           return {
+            foldersByAccount: inFolder
+              ? { ...s.foldersByAccount, [key]: withoutPlaylist(folders, id) }
+              : s.foldersByAccount,
             hiddenByAccount: alreadyHidden
               ? s.hiddenByAccount
               : { ...s.hiddenByAccount, [key]: [...hidden, id] },
@@ -164,6 +213,65 @@ export const usePinnedPlaylistsStore = create<State>()(
           next.splice(to, 0, moved);
           return { byAccount: { ...s.byAccount, [key]: next } };
         }),
+      createFolder: (name, playlistId) => {
+        const key = get().activeAccountId;
+        if (key === null) return null;
+        const id = `folder-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+        set((s) => ({
+          foldersByAccount: {
+            ...s.foldersByAccount,
+            [key]: [
+              ...(s.foldersByAccount[key] ?? []),
+              { id, name, playlistIds: [], collapsed: false },
+            ],
+          },
+        }));
+        if (playlistId) get().moveToFolder(playlistId, id);
+        return id;
+      },
+      renameFolder: (folderId, name) =>
+        updateFolders(set, (folders) =>
+          folders.map((f) => (f.id === folderId ? { ...f, name } : f)),
+        ),
+      deleteFolder: (folderId) =>
+        updateFolders(set, (folders) =>
+          folders.filter((f) => f.id !== folderId),
+        ),
+      toggleFolder: (folderId) =>
+        updateFolders(set, (folders) =>
+          folders.map((f) =>
+            f.id === folderId ? { ...f, collapsed: !f.collapsed } : f,
+          ),
+        ),
+      removeFromFolder: (playlistId) =>
+        updateFolders(set, (folders) => withoutPlaylist(folders, playlistId)),
+      moveToFolder: (playlistId, folderId) =>
+        set((s) => {
+          if (s.activeAccountId === null) return s;
+          const key = s.activeAccountId;
+          const folders = s.foldersByAccount[key] ?? [];
+          if (!folders.some((f) => f.id === folderId)) return s;
+          return {
+            foldersByAccount: {
+              ...s.foldersByAccount,
+              [key]: withoutPlaylist(folders, playlistId).map((f) =>
+                f.id === folderId
+                  ? { ...f, playlistIds: [...f.playlistIds, playlistId] }
+                  : f,
+              ),
+            },
+            byAccount: {
+              ...s.byAccount,
+              [key]: (s.byAccount[key] ?? []).filter((x) => x.id !== playlistId),
+            },
+            hiddenByAccount: {
+              ...s.hiddenByAccount,
+              [key]: (s.hiddenByAccount[key] ?? []).filter(
+                (x) => x !== playlistId,
+              ),
+            },
+          };
+        }),
     }),
     {
       name: "ytm-pinned-playlists",
@@ -173,13 +281,15 @@ export const usePinnedPlaylistsStore = create<State>()(
       partialize: (s) => ({
         byAccount: s.byAccount,
         hiddenByAccount: s.hiddenByAccount,
+        foldersByAccount: s.foldersByAccount,
       }),
       // v0/v1: `{ pinned: [...] }` (no version field, the absence
       //         counts as version 0). Promote the list into the
       //         `__legacy__` bucket so the first sign-in claims it.
       // v2:    `{ byAccount: { ... } }` (current).
-      // `hiddenByAccount` (added after v2) is an additive field: older
-      // persisted blobs simply omit it and the store's initial `{}`
+      // `hiddenByAccount` and `foldersByAccount` (added after v2) are
+      // additive fields: older
+      // persisted blobs simply omit them and the store's initial `{}`
       // fills the gap via persist's shallow merge — no version bump
       // needed.
       migrate: (persistedState, version) => {
@@ -234,8 +344,33 @@ export function useIsHidden(id: string): boolean {
   });
 }
 
+/** Current account's folders. `[]` when signed out. */
+export function useFolders(): PlaylistFolder[] {
+  return usePinnedPlaylistsStore((s) => {
+    if (s.activeAccountId === null) return EMPTY_FOLDERS;
+    return s.foldersByAccount[s.activeAccountId] ?? EMPTY_FOLDERS;
+  });
+}
+
+/** Apply `fn` to the current account's folders; a no-op when signed out
+ *  or when `fn` returns the same list. */
+function updateFolders(
+  set: (fn: (s: State) => Partial<State> | State) => void,
+  fn: (folders: PlaylistFolder[]) => PlaylistFolder[],
+) {
+  set((s) => {
+    if (s.activeAccountId === null) return s;
+    const key = s.activeAccountId;
+    const folders = s.foldersByAccount[key] ?? [];
+    const next = fn(folders);
+    if (next === folders) return s;
+    return { foldersByAccount: { ...s.foldersByAccount, [key]: next } };
+  });
+}
+
 // Stable references for the empty lists — avoids forcing re-renders of
 // `usePinned()` / `useHidden()` consumers when the lookup misses (zustand
 // uses referential equality on selector returns by default).
 const EMPTY: PinnedPlaylist[] = [];
 const EMPTY_IDS: string[] = [];
+const EMPTY_FOLDERS: PlaylistFolder[] = [];
