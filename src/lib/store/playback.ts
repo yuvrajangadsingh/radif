@@ -10,6 +10,7 @@ import type { ShelfItem, Thumbnail } from "@/lib/innertube/types";
 import { isFloatingPlayerWindow } from "@/lib/floating-player";
 import { isCasting } from "@/lib/store/cast";
 import { isDisliked } from "@/lib/store/disliked";
+import { byHiddenArtist, HIDE_ARTIST_SHIPPED } from "@/lib/store/hidden-artists";
 import { useSettingsStore } from "@/lib/store/settings";
 import { safeLocalStorage } from "./safe-storage";
 
@@ -602,9 +603,14 @@ const playbackStateCreator: StateCreator<PlaybackState> = (set, get) => ({
     // "loading" wouldn't, because its resolve effect keys on
     // [videoId, index] and neither changes here, leaving the finished
     // element paused and playback stalled on the loader.
-    // A disliked current song isn't repeated; it moves on like any other.
+    // Songs passed over: disliked ones (with the setting on) and songs by an
+    // artist the listener hid. A passed-over current song isn't repeated.
     const skipping = useSettingsStore.getState().skipDisliked;
-    const replay = !(skipping && isDisliked(queue[index]?.videoId ?? ""));
+    const passOver = (t: QueueTrack | undefined) =>
+      !!t &&
+      ((skipping && isDisliked(t.videoId)) ||
+        (HIDE_ARTIST_SHIPPED && byHiddenArtist(t)));
+    const replay = !passOver(queue[index]);
     if (
       replay &&
       (repeat === "one" || (repeat === "all" && queue.length === 1))
@@ -629,17 +635,15 @@ const playbackStateCreator: StateCreator<PlaybackState> = (set, get) => ({
       nextQueue = shuffle && queue.length > 1 ? fisherYates(queue) : queue;
       nextIndex = 0;
     }
-    // Pass over disliked songs; a queue of nothing else stops.
-    if (skipping) {
-      for (let hops = 0; isDisliked(nextQueue[nextIndex].videoId); hops++) {
-        // Two passes: a wrap may reshuffle mid-scan.
-        if (hops >= 2 * nextQueue.length) return stop();
-        nextIndex++;
-        if (nextIndex >= nextQueue.length) {
-          if (repeat !== "all") return stop();
-          if (shuffle && nextQueue === queue) nextQueue = fisherYates(queue);
-          nextIndex = 0;
-        }
+    // Pass over them; a queue of nothing else stops.
+    for (let hops = 0; passOver(nextQueue[nextIndex]); hops++) {
+      // Two passes: a wrap may reshuffle mid-scan.
+      if (hops >= 2 * nextQueue.length) return stop();
+      nextIndex++;
+      if (nextIndex >= nextQueue.length) {
+        if (repeat !== "all") return stop();
+        if (shuffle && nextQueue === queue) nextQueue = fisherYates(queue);
+        nextIndex = 0;
       }
     }
     // Only the current song is left to play (repeat all): replay it in place,
