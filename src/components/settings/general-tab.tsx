@@ -11,6 +11,7 @@ import {
   RocketIcon,
   UserRoundIcon,
   XIcon,
+  ThumbsDownIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -118,6 +119,8 @@ function BehaviorGroup() {
     (s) => s.setPlaybackNotifications,
   );
   const normalizeVolume = useSettingsStore((s) => s.normalizeVolume);
+  const skipDisliked = useSettingsStore((s) => s.skipDisliked);
+  const setSkipDisliked = useSettingsStore((s) => s.setSkipDisliked);
   // The same check the gain itself uses (lib/loudness.ts): no active account,
   // no measurement, so the switch would do nothing.
   // Still loading counts as signed in, so the switch doesn't flash off.
@@ -187,6 +190,18 @@ function BehaviorGroup() {
             disabled={!signedIn}
             onCheckedChange={setNormalizeVolume}
             aria-label="Normalize volume"
+          />
+        }
+      />
+      <SettingRow
+        icon={ThumbsDownIcon}
+        title="Skip disliked songs"
+        description="The queue moves past songs you've disliked. One you click still plays."
+        control={
+          <Switch
+            checked={skipDisliked}
+            onCheckedChange={setSkipDisliked}
+            aria-label="Skip disliked songs"
           />
         }
       />

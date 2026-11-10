@@ -14,6 +14,7 @@ import {
 import { clearPrefetchMemo } from "@/lib/stream";
 import { openChannelPicker } from "@/lib/store/channel-picker";
 import { usePlaybackStore } from "@/lib/store/playback";
+import { useDislikedStore } from "@/lib/store/disliked";
 import { usePinnedPlaylistsStore } from "@/lib/store/pinned-playlists";
 import { usePremiumStore } from "@/lib/store/premium";
 import { useSearchHistory } from "@/lib/store/search-history";
@@ -203,6 +204,8 @@ export function useAccountsChangedListener(): void {
       usePlaybackStore.getState().clearQueue();
       // Not something to Undo: the old account's queue stays gone.
       usePlaybackStore.setState({ cleared: undefined });
+      // Dislikes belong to the account that made them.
+      useDislikedStore.getState().clear();
 
       // 3. Other per-account local state: typed search history,
       //    per-track Song↔Video preferences, cached Premium status.
