@@ -9,10 +9,16 @@ import type { PlaybackState, QueueTrack } from "@/lib/store/playback";
 // variants, so this only sidesteps the storage plumbing.
 (globalThis as unknown as { window: unknown }).window = {
   location: { search: "?floating-player" },
+  // The settings store listens for other windows' changes.
+  addEventListener: () => {},
+  localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
 };
 
 const { usePlaybackStore, resumePoint, createThrottledStorage, noPickSince } =
   await import("@/lib/store/playback");
+const { useDislikedStore, rateHere, learnDisliked, isDisliked, learnFromRows } =
+  await import("@/lib/store/disliked");
+const { useSettingsStore } = await import("@/lib/store/settings");
 
 function track(videoId: string): QueueTrack {
   return { videoId, title: videoId, thumbnails: [] };
@@ -543,5 +549,120 @@ describe("noPickSince (QA r13 N1)", () => {
       act();
       expect(fresh()).toBe(false);
     }
+  });
+});
+
+describe("skipping disliked songs", () => {
+  const ids = (...v: string[]) =>
+    useDislikedStore.setState({
+      ids: Object.fromEntries(v.map((id) => [id, true as const])),
+    });
+  const queue = () => "abcde".split("").map(track);
+
+  beforeEach(() => {
+    useSettingsStore.setState({ skipDisliked: true });
+    ids();
+  });
+
+  it("passes over disliked songs", () => {
+    ids("b", "c");
+    setup({ queue: queue(), index: 0 });
+    usePlaybackStore.getState().next();
+    expect(usePlaybackStore.getState().index).toBe(3);
+  });
+
+  it("stops at the end, or wraps under repeat all", () => {
+    ids("d", "e");
+    setup({ queue: queue(), index: 2 });
+    usePlaybackStore.getState().next();
+    expect(usePlaybackStore.getState().playing).toBe(false);
+    expect(usePlaybackStore.getState().index).toBe(2);
+    setup({ queue: queue(), index: 2, repeat: "all" });
+    usePlaybackStore.getState().next();
+    expect(usePlaybackStore.getState().index).toBe(0);
+  });
+
+  it("stops when everything else is disliked, and plays them with it off", () => {
+    ids("a", "b", "c", "d", "e");
+    setup({ queue: queue(), index: 0, repeat: "all" });
+    usePlaybackStore.getState().next();
+    expect(usePlaybackStore.getState().playing).toBe(false);
+    useSettingsStore.setState({ skipDisliked: false });
+    setup({ queue: queue(), index: 0 });
+    usePlaybackStore.getState().next();
+    expect(usePlaybackStore.getState().index).toBe(1);
+  });
+
+  it("plays a disliked song the listener picks", () => {
+    ids("c");
+    setup({ queue: queue(), index: 0 });
+    usePlaybackStore.getState().goTo(2);
+    expect(usePlaybackStore.getState().index).toBe(2);
+  });
+
+  it("finds the one playable song after a reshuffling wrap", () => {
+    ids("b", "c", "d", "e");
+    setup({ queue: queue(), index: 0, repeat: "all", shuffle: true });
+    usePlaybackStore.getState().next();
+    const s = usePlaybackStore.getState();
+    expect(s.playing).toBe(true);
+    expect(s.queue[s.index].videoId).toBe("a");
+  });
+
+  it("moves on from a disliked song under repeat one", () => {
+    ids("a");
+    setup({ queue: queue(), index: 0, repeat: "one" });
+    usePlaybackStore.getState().next();
+    expect(usePlaybackStore.getState().index).toBe(1);
+  });
+
+  it("replays the current song when it's the only one left (repeat all)", () => {
+    ids("b");
+    setup({ queue: [track("a"), track("b")], index: 0, repeat: "all" });
+    usePlaybackStore.getState().next();
+    const s = usePlaybackStore.getState();
+    expect(s.index).toBe(0);
+    expect(s.pendingSeek).toBe(0);
+    expect(s.streamUrl).toBe("blob:prev");
+  });
+});
+
+describe("what the disliked set learns", () => {
+  it("takes a dislike from YouTube Music unless one was rated here since", () => {
+    learnDisliked("x", Date.now());
+    expect(isDisliked("x")).toBe(true);
+    const asked = Date.now() - 1000;
+    rateHere("y", false); // liked here after the lookup went out
+    learnDisliked("y", asked);
+    expect(isDisliked("y")).toBe(false);
+    rateHere("x", false);
+    expect(isDisliked("x")).toBe(false);
+    // Sent before an account switch: it doesn't land in the new account's.
+    const before = Date.now() - 1000;
+    useDislikedStore.getState().clear();
+    learnDisliked("z", before);
+    rateHere("z", true, before);
+    expect(isDisliked("z")).toBe(false);
+  });
+
+  it("reads the rating on each playlist row", () => {
+    // The shape of a playlist row's menu button, Nov 10.
+    const row = (videoId: string, likeStatus: string) => ({
+      musicResponsiveListItemRenderer: {
+        menu: {
+          menuRenderer: {
+            topLevelButtons: [
+              { likeButtonRenderer: { target: { videoId }, likeStatus } },
+            ],
+          },
+        },
+      },
+    });
+    learnFromRows(
+      { contents: [row("p1", "DISLIKE"), row("p2", "INDIFFERENT")] },
+      Date.now() + 1, // after the clear() above
+    );
+    expect(isDisliked("p1")).toBe(true);
+    expect(isDisliked("p2")).toBe(false);
   });
 });

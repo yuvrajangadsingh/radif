@@ -11,6 +11,8 @@ import {
   RocketIcon,
   UserRoundIcon,
   XIcon,
+  ThumbsDownIcon,
+  UserXIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -21,6 +23,11 @@ import { IS_MAC } from "@/lib/platform";
 import { authLoggedInQuery } from "@/lib/store/auth-queries";
 import { useSettingsStore } from "@/lib/store/settings";
 import { useAccounts } from "@/lib/store/accounts";
+import {
+  HIDE_ARTIST_SHIPPED,
+  useHiddenArtistsStore,
+} from "@/lib/store/hidden-artists";
+import { usePinnedPlaylistsStore } from "@/lib/store/pinned-playlists";
 
 export function GeneralTab() {
   return (
@@ -118,6 +125,8 @@ function BehaviorGroup() {
     (s) => s.setPlaybackNotifications,
   );
   const normalizeVolume = useSettingsStore((s) => s.normalizeVolume);
+  const skipDisliked = useSettingsStore((s) => s.skipDisliked);
+  const setSkipDisliked = useSettingsStore((s) => s.setSkipDisliked);
   // The same check the gain itself uses (lib/loudness.ts): no active account,
   // no measurement, so the switch would do nothing.
   // Still loading counts as signed in, so the switch doesn't flash off.
@@ -190,6 +199,19 @@ function BehaviorGroup() {
           />
         }
       />
+      <SettingRow
+        icon={ThumbsDownIcon}
+        title="Skip disliked songs"
+        description="The queue moves past songs you've disliked. One you click still plays."
+        control={
+          <Switch
+            checked={skipDisliked}
+            onCheckedChange={setSkipDisliked}
+            aria-label="Skip disliked songs"
+          />
+        }
+      />
+      {HIDE_ARTIST_SHIPPED && <HiddenArtistsRow />}
       {IS_MAC && (
         <SettingRow
           icon={PanelTopIcon}
@@ -221,5 +243,42 @@ function BehaviorGroup() {
         }
       />
     </Group>
+  );
+}
+
+/** Artists hidden from a song's menu, each with Unhide. */
+function HiddenArtistsRow() {
+  const account = usePinnedPlaylistsStore((s) => s.activeAccountId);
+  const hidden = useHiddenArtistsStore((s) =>
+    account ? s.byAccount[account] : undefined,
+  );
+  const unhide = useHiddenArtistsStore((s) => s.unhide);
+  const entries = Object.entries(hidden ?? {});
+  return (
+    <SettingRow
+      icon={UserXIcon}
+      title="Hidden artists"
+      description={
+        entries.length === 0 ? (
+          "None. Use Hide this artist in a song's menu to skip an artist's songs."
+        ) : (
+          <span className="flex flex-col gap-1 pt-1">
+            {entries.map(([id, name]) => (
+              <span key={id} className="flex items-center gap-2">
+                <span className="min-w-0 truncate">{name || id}</span>
+                <Button
+                  variant="link"
+                  size="sm"
+                  className="h-auto p-0"
+                  onClick={() => unhide(id)}
+                >
+                  Unhide
+                </Button>
+              </span>
+            ))}
+          </span>
+        )
+      }
+    />
   );
 }

@@ -6,9 +6,16 @@ import {
 } from "zustand/middleware";
 import { emit } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import type { ShelfItem, Thumbnail } from "@/lib/innertube/types";
+import type {
+  MinimalArtist,
+  ShelfItem,
+  Thumbnail,
+} from "@/lib/innertube/types";
 import { isFloatingPlayerWindow } from "@/lib/floating-player";
 import { isCasting } from "@/lib/store/cast";
+import { isDisliked } from "@/lib/store/disliked";
+import { byHiddenArtist, HIDE_ARTIST_SHIPPED } from "@/lib/store/hidden-artists";
+import { useSettingsStore } from "@/lib/store/settings";
 import { safeLocalStorage } from "./safe-storage";
 
 /**
@@ -30,7 +37,7 @@ export type QueueTrack = {
   videoId: string;
   title: string;
   subtitle?: string;
-  artists?: { id?: string; name: string }[];
+  artists?: MinimalArtist[];
   album?: string;
   /** Browse id ("MPREb_…") behind "Go to album" in the player menu. */
   albumId?: string;
@@ -600,27 +607,54 @@ const playbackStateCreator: StateCreator<PlaybackState> = (set, get) => ({
     // "loading" wouldn't, because its resolve effect keys on
     // [videoId, index] and neither changes here, leaving the finished
     // element paused and playback stalled on the loader.
-    if (repeat === "one" || (repeat === "all" && queue.length === 1)) {
+    // Songs passed over: disliked ones (with the setting on) and songs by an
+    // artist the listener hid. A passed-over current song isn't repeated.
+    const skipping = useSettingsStore.getState().skipDisliked;
+    const passOver = (t: QueueTrack | undefined) =>
+      !!t &&
+      ((skipping && isDisliked(t.videoId)) ||
+        (HIDE_ARTIST_SHIPPED && byHiddenArtist(t)));
+    const replay = !passOver(queue[index]);
+    if (
+      replay &&
+      (repeat === "one" || (repeat === "all" && queue.length === 1))
+    ) {
       set({ position: 0, pendingSeek: 0, playing: true });
       return;
     }
+    // Rewind too: an outro or end guard stops the element mid-file, and
+    // a later play of this slot (Play, Start radio) must start it over.
+    const stop = () =>
+      set({
+        playing: false,
+        position: 0,
+        pendingSeek: 0,
+        queueEnded: get().queueEnded + 1,
+      });
     let nextQueue = queue;
     let nextIndex = index + 1;
     if (nextIndex >= queue.length) {
-      if (repeat !== "all") {
-        // Rewind too: an outro or end guard stops the element mid-file, and
-        // a later play of this slot (Play, Start radio) must start it over.
-        set({
-          playing: false,
-          position: 0,
-          pendingSeek: 0,
-          queueEnded: get().queueEnded + 1,
-        });
-        return;
-      }
+      if (repeat !== "all" || queue.length === 1) return stop();
       // Looping with shuffle on → reshuffle so the next pass isn't identical.
       nextQueue = shuffle && queue.length > 1 ? fisherYates(queue) : queue;
       nextIndex = 0;
+    }
+    // Pass over them; a queue of nothing else stops.
+    for (let hops = 0; passOver(nextQueue[nextIndex]); hops++) {
+      // Two passes: a wrap may reshuffle mid-scan.
+      if (hops >= 2 * nextQueue.length) return stop();
+      nextIndex++;
+      if (nextIndex >= nextQueue.length) {
+        if (repeat !== "all") return stop();
+        if (shuffle && nextQueue === queue) nextQueue = fisherYates(queue);
+        nextIndex = 0;
+      }
+    }
+    // Only the current song is left to play (repeat all): replay it in place,
+    // as repeat-one does, or the engine sees the same slot and stalls.
+    if (nextIndex === index && nextQueue[nextIndex] === queue[index]) {
+      set({ position: 0, pendingSeek: 0, playing: true });
+      return;
     }
     const track = nextQueue[nextIndex];
     set({

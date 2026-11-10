@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 (globalThis as unknown as { window: unknown }).window = {
   location: { search: "?floating-player" },
+  // The settings store listens for other windows' changes.
+  addEventListener: () => {},
 };
 const { usePlaybackStore } = await import("@/lib/store/playback");
 

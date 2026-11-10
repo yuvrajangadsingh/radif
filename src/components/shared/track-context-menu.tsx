@@ -23,6 +23,7 @@ import {
   PlusIcon,
   MoreHorizontalIcon,
   Loader2Icon,
+  UserXIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -55,6 +56,14 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useDislikedStore } from "@/lib/store/disliked";
+import {
+  HIDE_ARTIST_SHIPPED,
+  hasArtist,
+  useHiddenArtistsStore,
+} from "@/lib/store/hidden-artists";
+import { usePinnedPlaylistsStore } from "@/lib/store/pinned-playlists";
+import { isFloatingPlayerWindow } from "@/lib/floating-player";
 import { getLikedIdsSet } from "@/components/shared/like-buttons";
 import { fetchRadio, fetchTrackAlbumId } from "@/lib/innertube/radio";
 import { fetchLikedSongs } from "@/lib/innertube/library";
@@ -179,6 +188,18 @@ export function useTrackMenuController(item: ShelfItem) {
       toast.error(`Remove failed: ${String(e)}`);
     }
   };
+  const runRemoveDislike = async () => {
+    try {
+      await removeRating(item.id);
+      // A cleared rating isn't a like either.
+      qc.setQueryData<ShelfItem[]>(["liked-songs"], (old) =>
+        (old ?? []).filter((t) => t.id !== item.id),
+      );
+      toast.success("Dislike removed");
+    } catch (e) {
+      toast.error(`Failed: ${String(e)}`);
+    }
+  };
   const runDislike = async () => {
     try {
       await dislikeTrack(item.id);
@@ -276,6 +297,7 @@ export function useTrackMenuController(item: ShelfItem) {
     runLike,
     runRemoveRating,
     runDislike,
+    runRemoveDislike,
     runAddToPlaylist,
     runRemoveFromPlaylist,
     primeUserPlaylists,
@@ -317,6 +339,7 @@ export function TrackMenuItems({
     runLike,
     runRemoveRating,
     runDislike,
+    runRemoveDislike,
     runAddToPlaylist,
     runRemoveFromPlaylist,
     primeUserPlaylists,
@@ -324,6 +347,34 @@ export function TrackMenuItems({
   } = controller;
 
   const artist = item.artists?.find((a) => !!a.id);
+  const disliked = useDislikedStore((s) => !!s.ids[item.id]);
+  // Every credited artist with an id, so a collaboration names who gets
+  // hidden instead of picking one.
+  const account = usePinnedPlaylistsStore((s) => s.activeAccountId);
+  const hiddenMap = useHiddenArtistsStore((s) =>
+    account ? s.byAccount[account] : undefined,
+  );
+  // Not signed out (nowhere to keep it), not in the floating window, and
+  // not a home card's byline-only artist, whose name may credit someone
+  // else.
+  const credited =
+    HIDE_ARTIST_SHIPPED && account !== null && !isFloatingPlayerWindow()
+      ? (item.artists ?? []).filter(
+          (a): a is { id: string; name: string } =>
+            !!a.id && !a.bylineOnly,
+        )
+      : [];
+  const isHidden = (id: string) => hasArtist(hiddenMap, id);
+  const toHide = credited.filter((a) => !isHidden(a.id));
+  const toUnhide = credited.filter((a) => isHidden(a.id));
+  const hideArtist = (a: { id: string; name: string }) => {
+    const { hide, unhide } = useHiddenArtistsStore.getState();
+    const hidIn = account;
+    hide(a);
+    toast(`Hid ${a.name || "this artist"}. Their songs are skipped.`, {
+      action: { label: "Undo", onClick: () => unhide(a.id, hidIn) },
+    });
+  };
 
   // Home cards ship no album anywhere in their payload, so fall back to a
   // /next lookup. Menu content only mounts while the menu is open, so this
@@ -389,10 +440,49 @@ export function TrackMenuItems({
           Add to liked
         </Item>
       )}
-      <Item onSelect={runDislike}>
-        <ThumbsDownIcon />
-        Not interested
-      </Item>
+      {disliked ? (
+        <Item onSelect={runRemoveDislike}>
+          <ThumbsDownIcon className="fill-current" />
+          Remove dislike
+        </Item>
+      ) : (
+        <Item onSelect={runDislike}>
+          <ThumbsDownIcon />
+          Not interested
+        </Item>
+      )}
+      {toUnhide.map((a) => (
+        <Item
+          key={`unhide-${a.id}`}
+          onSelect={() => useHiddenArtistsStore.getState().unhide(a.id)}
+        >
+          <UserXIcon className="text-brand" />
+          Unhide {a.name || "this artist"}
+        </Item>
+      ))}
+      {toHide.length === 1 ? (
+        <Item onSelect={() => hideArtist(toHide[0])}>
+          <UserXIcon />
+          Hide this artist
+          <span className="ml-auto max-w-32 truncate pl-3 text-xs text-muted-foreground">
+            {toHide[0].name}
+          </span>
+        </Item>
+      ) : toHide.length > 1 ? (
+        <Sub>
+          <SubTrigger>
+            <UserXIcon />
+            Hide this artist
+          </SubTrigger>
+          <SubContent>
+            {toHide.map((a) => (
+              <Item key={a.id} onSelect={() => hideArtist(a)}>
+                <span className="max-w-48 truncate">{a.name || a.id}</span>
+              </Item>
+            ))}
+          </SubContent>
+        </Sub>
+      ) : null}
 
       <Sub>
         <SubTrigger
