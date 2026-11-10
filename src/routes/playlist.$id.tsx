@@ -47,6 +47,10 @@ import {
   usePlaylistSortStore,
   type PlaylistSortMode,
 } from "@/lib/store/playlist-sort";
+import {
+  sortTracks as sortForView,
+  SORT_FIXUP_SHIPPED,
+} from "@/lib/playlist-sort";
 
 export const Route = createFileRoute("/playlist/$id")({
   component: PlaylistPageView,
@@ -95,9 +99,13 @@ function PlaylistPageView() {
   const unpin = usePinnedPlaylistsStore((s) => s.unpin);
   const isLikedSongs = id === "LM" || id === "VLLM";
 
-  const sortMode = usePlaylistSortStore(
+  const storedSort = usePlaylistSortStore(
     (s) => s.modes[id] ?? ("default" as PlaylistSortMode),
   );
+  // An Album sort saved while the fix-up was on reads as the default
+  // once it's off, rather than a label over playlist order.
+  const sortMode: PlaylistSortMode =
+    !SORT_FIXUP_SHIPPED && storedSort === "album-asc" ? "default" : storedSort;
   const setSortMode = usePlaylistSortStore((s) => s.setMode);
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -143,7 +151,9 @@ function PlaylistPageView() {
     () =>
       isArtistTopSongs
         ? sortTracksByPlayCount(tracks)
-        : sortTracks(tracks, sortMode),
+        : SORT_FIXUP_SHIPPED
+          ? sortForView(tracks, sortMode)
+          : sortTracks(tracks, sortMode),
     [isArtistTopSongs, tracks, sortMode],
   );
   const visibleTracks = useMemo(() => {
@@ -172,6 +182,16 @@ function PlaylistPageView() {
   // Bumped when this playlist goes away, so a Shuffle still loading for it
   // doesn't play it (or the next playlist's pages) afterwards.
   const opRef = useRef(0);
+  // Bumped by each Play and Shuffle press: a later press wins over one
+  // still loading.
+  const pressRef = useRef(0);
+  const shufflePressRef = useRef(0);
+  // Counts view changes (sort or filter), so a Play still loading can tell
+  // the view changed even if it was changed back before it looked.
+  const viewGenRef = useRef(0);
+  useEffect(() => {
+    viewGenRef.current++;
+  }, [sortMode, normalizedQuery]);
   useEffect(
     () => () => {
       opRef.current++;
@@ -248,6 +268,55 @@ function PlaylistPageView() {
 
   if (!header) return <PlaylistSkeleton />;
 
+  // Play plays what's shown, in the order shown. A sorted playlist still
+  // loading loads the rest first (as Shuffle does), then plays in order.
+  const playShown = async () => {
+    const play = (list: ShelfItem[]) => {
+      if (list.length === 0) return;
+      // Off first: with shuffle on, building the queue would shuffle what
+      // Play promised in order.
+      usePlaybackStore.getState().setShuffle(false);
+      usePlaybackStore.getState().playShelfItems(list, 0);
+    };
+    if (normalizedQuery) {
+      if (!query.hasNextPage) play(visibleTracks);
+      return;
+    }
+    if (sortMode === "default" || !query.hasNextPage) {
+      play(sortedTracks);
+      return;
+    }
+    const op = opRef.current;
+    const press = ++pressRef.current;
+    const noPick = noPickSince();
+    const mode = sortMode;
+    const view = viewGenRef.current;
+    // Leaving, a later press, a song picked, or any change to the view
+    // (another sort, Default, a filter, even one undone) drops this Play.
+    const stale = () =>
+      opRef.current !== op ||
+      pressRef.current !== press ||
+      !noPick() ||
+      viewGenRef.current !== view;
+    let loaded = tracks;
+    const toastId = toast.loading("Loading the whole playlist to play it in this order");
+    try {
+      await loadEveryPage({ hasNextPage: true }, async () => {
+        if (stale()) throw new Error("left the playlist");
+        const step = await query.fetchNextPage({ cancelRefetch: false });
+        if (!stale() && step.data) {
+          loaded = step.data.pages.flatMap((p) => p.tracks);
+        }
+        return step;
+      });
+    } catch {
+      // Play what did load, in order.
+    } finally {
+      toast.dismiss(toastId);
+    }
+    if (!stale()) play(sortForView(loaded, mode));
+  };
+
   const shufflePlaylist = async () => {
     const store = usePlaybackStore.getState();
     // With a filter on, Shuffle means the tracks it shows. The filter loads
@@ -265,11 +334,19 @@ function PlaylistPageView() {
     // set, so it's only the fallback for when the pages won't load.
     // Leaving this playlist (or the page) while it loads drops the shuffle.
     const op = opRef.current;
+    // Shuffle pressed again while one loads: that one stays, as the latest
+    // press (so it still wins over a Play pressed in between).
+    const press = ++pressRef.current;
+    shufflePressRef.current = press;
     if (shufflingRef.current === op) return;
     shufflingRef.current = op;
-    // A song picked, or the queue changed by hand, while it loads wins.
+    // A song picked, the queue changed by hand, or a later Play while it
+    // loads wins.
     const noPick = noPickSince();
-    const stale = () => opRef.current !== op || !noPick();
+    const stale = () =>
+      opRef.current !== op ||
+      pressRef.current !== shufflePressRef.current ||
+      !noPick();
     let loaded = tracks;
     const toastId = query.hasNextPage
       ? toast.loading("Loading the whole playlist to shuffle")
@@ -373,7 +450,9 @@ function PlaylistPageView() {
         onPlay={
           openedFromArtist
             ? undefined
-            : () => {
+            : SORT_FIXUP_SHIPPED
+              ? () => void playShown()
+              : () => {
                 // With a filter on, Play means the tracks it shows, like
                 // Shuffle (both wait for every page to load).
                 const list = normalizedQuery ? visibleTracks : tracks;
@@ -637,13 +716,19 @@ function SortMenu({
     "title-asc",
     "title-desc",
     "artist-asc",
+    ...(SORT_FIXUP_SHIPPED ? (["album-asc"] as const) : []),
     "duration-asc",
     "duration-desc",
   ];
   // Non-Liked playlists have a server-defined order that isn't always
-  // chronological — relabel "default" to something accurate.
+  // chronological — relabel "default" to something accurate. Rows carry
+  // no date added, so outside Liked songs the reverse is just a reverse.
   const labelFor = (m: PlaylistSortMode) =>
-    m === "default" && !isLikedSongs ? "Default order" : SORT_LABELS[m];
+    m === "default" && !isLikedSongs
+      ? "Default order"
+      : SORT_FIXUP_SHIPPED && m === "date-added-asc" && !isLikedSongs
+        ? "Reverse order"
+        : SORT_LABELS[m];
 
   return (
     <DropdownMenu>
