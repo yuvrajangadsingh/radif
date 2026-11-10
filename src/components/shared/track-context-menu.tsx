@@ -8,7 +8,11 @@ import {
   type ReactNode,
 } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  type QueryClient,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import {
   LinkIcon,
   ListPlusIcon,
@@ -164,6 +168,11 @@ export function useTrackMenuController(item: ShelfItem) {
           ...list,
         ];
       });
+      // Library's search across playlists holds Liked Music whole.
+      qc.removeQueries({
+        queryKey: ["playlist-full"],
+        predicate: (q) => q.queryKey[2] === "LM",
+      });
       toast.success("Added to Liked songs");
       syncLastfmLove(item, true);
     } catch (e) {
@@ -176,6 +185,11 @@ export function useTrackMenuController(item: ShelfItem) {
       qc.setQueryData<ShelfItem[]>(["liked-songs"], (old) =>
         (old ?? []).filter((t) => t.id !== item.id),
       );
+      // Library's search across playlists holds Liked Music whole.
+      qc.removeQueries({
+        queryKey: ["playlist-full"],
+        predicate: (q) => q.queryKey[2] === "LM",
+      });
       toast.success("Removed from Liked songs");
       syncLastfmLove(item, false);
     } catch (e) {
@@ -200,6 +214,11 @@ export function useTrackMenuController(item: ShelfItem) {
       qc.setQueryData<ShelfItem[]>(["liked-songs"], (old) =>
         (old ?? []).filter((t) => t.id !== item.id),
       );
+      // Library's search across playlists holds Liked Music whole.
+      qc.removeQueries({
+        queryKey: ["playlist-full"],
+        predicate: (q) => q.queryKey[2] === "LM",
+      });
       toast.success("Marked as not interested");
       syncLastfmLove(item, false);
     } catch (e) {
@@ -224,6 +243,8 @@ export function useTrackMenuController(item: ShelfItem) {
       // possibly VL-prefixed id), so ["playlist", p.id] never matched and
       // the invalidation was a no-op. Prefix-match every open playlist page.
       await qc.invalidateQueries({ queryKey: ["playlist-pages-v2"] });
+      // Library's search across playlists loads them whole; reload this one.
+      forgetWholePlaylist(qc, p.id);
       toast.success(`Added to ${p.title}`);
     } catch (e) {
       toast.error(`Add failed: ${String(e)}`);
@@ -242,6 +263,7 @@ export function useTrackMenuController(item: ShelfItem) {
         // that copy back, so YouTube's duplicate check has to be skipped.
         await addToPlaylist(removal.playlistId, item.id, { force: true });
         await qc.invalidateQueries({ queryKey: ["playlist-pages-v2"] });
+        forgetWholePlaylist(qc, removal.playlistId);
         toast.success("Added back (at the end of the playlist)");
       } catch (e) {
         toast.error(`Undo failed: ${String(e)}`);
@@ -267,6 +289,7 @@ export function useTrackMenuController(item: ShelfItem) {
           })),
         };
       });
+      forgetWholePlaylist(qc, removal.playlistId);
       toast.success("Removed from playlist", {
         action: { label: "Undo", onClick: () => void undoRemove() },
       });
@@ -298,6 +321,16 @@ export function useTrackMenuController(item: ShelfItem) {
     newPlaylistOpen,
     setNewPlaylistOpen,
   };
+}
+
+/** Drop one playlist from Library's search-across-playlists cache. Its
+ *  query key is ["playlist-full", account, id], id with or without VL. */
+function forgetWholePlaylist(qc: QueryClient, id: string) {
+  const bare = id.replace(/^VL/, "");
+  qc.removeQueries({
+    queryKey: ["playlist-full"],
+    predicate: (q) => String(q.queryKey[2]).replace(/^VL/, "") === bare,
+  });
 }
 
 export function TrackMenuItems({

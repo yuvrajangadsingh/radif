@@ -23,6 +23,7 @@ import {
 } from "@/lib/innertube/playlist";
 import { fetchShuffleQueue } from "@/lib/innertube/radio";
 import { loadEveryPage } from "@/lib/load-every-page";
+import { trackMatches } from "@/lib/track-match";
 import type { ShelfItem } from "@/lib/innertube/types";
 import { EntityHeader } from "@/components/shared/entity-header";
 import { ExpandableText } from "@/components/shared/expandable-text";
@@ -148,18 +149,7 @@ function PlaylistPageView() {
   );
   const visibleTracks = useMemo(() => {
     if (!normalizedQuery) return sortedTracks;
-    return sortedTracks.filter((t) => {
-      const haystack = [
-        t.title,
-        t.album,
-        t.subtitle,
-        ...(t.artists?.map((a) => a.name) ?? []),
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-      return haystack.includes(normalizedQuery);
-    });
+    return sortedTracks.filter((t) => trackMatches(t, normalizedQuery));
   }, [sortedTracks, normalizedQuery]);
 
   // Load more whenever the sentinel enters the viewport. `rootMargin`
