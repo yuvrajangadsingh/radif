@@ -25,6 +25,7 @@ use tower_http::cors::CorsLayer;
 use tower_http::services::ServeFile;
 
 mod now_playing;
+mod url_scheme;
 mod app_nap;
 mod applog;
 mod authfs;
@@ -5505,6 +5506,7 @@ pub fn run() {
         )
         .manage(state)
         .manage(CloseBehavior::default())
+        .manage(url_scheme::PendingUrls::default())
         .manage(authfs::MutationLocks::default())
         .manage(RefreshGuard::default())
         .manage(SignedOutSweep::default())
@@ -5515,6 +5517,7 @@ pub fn run() {
         // never casts costs nothing.
         .manage(cast::CastState::default())
         .invoke_handler(tauri::generate_handler![
+            url_scheme::radif_url_drain,
             ensure_ytdlp,
             resolve_stream_ytdlp,
             resolve_hls_stream,
@@ -5797,6 +5800,10 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen { .. } = _event {
                 show_main_window(_app);
+            }
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Opened { urls } = &_event {
+                url_scheme::opened(_app, urls);
             }
         });
 }
