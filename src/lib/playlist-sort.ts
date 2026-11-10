@@ -4,7 +4,7 @@ import type { PlaylistSortMode } from "@/lib/store/playlist-sort";
 /** The sort fix-up ships hidden until QA passes it: album, the labels, this
  *  comparator, Play following the view, a cancellable full load. Delete in
  *  the release that ships it. */
-export const SORT_FIXUP_SHIPPED = false;
+export const SORT_FIXUP_SHIPPED = true;
 
 // One collator for every compare, in the system locale: base sensitivity
 // so case doesn't split titles and, where the locale treats them as one

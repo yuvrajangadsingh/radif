@@ -12,7 +12,7 @@ export type PinnedPlaylist = {
 
 /** Sidebar folders ship hidden until QA passes them. Delete in the
  *  release that ships them. */
-export const FOLDERS_SHIPPED = false;
+export const FOLDERS_SHIPPED = true;
 
 /** A local sidebar folder. One level: it holds playlists, not folders. */
 export type PlaylistFolder = {

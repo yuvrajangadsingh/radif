@@ -4,7 +4,7 @@ import { usePinnedPlaylistsStore } from "./pinned-playlists";
 import { safeLocalStorage } from "./safe-storage";
 
 /** Ships hidden until QA passes it. Delete in the release that ships it. */
-export const HIDE_ARTIST_SHIPPED = false;
+export const HIDE_ARTIST_SHIPPED = true;
 
 /**
  * Artists the listener chose to hide ("Hide this artist"): their songs are

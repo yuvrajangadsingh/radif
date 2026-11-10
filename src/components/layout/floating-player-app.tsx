@@ -24,7 +24,7 @@ import { cn } from "@/lib/utils";
 
 /** The pin also shows the window over other apps' full-screen Spaces.
  *  Ships hidden until QA passes it; delete in the release that ships it. */
-export const FLOAT_OVER_FULLSCREEN_SHIPPED = false;
+export const FLOAT_OVER_FULLSCREEN_SHIPPED = true;
 import { queryClient } from "@/lib/query-client";
 
 // Wire the store's user-facing actions to emit Tauri events instead of
