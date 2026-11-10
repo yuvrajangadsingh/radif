@@ -15,11 +15,14 @@ export const SKIP_RAMP_MS = 150;
 export const PREP_LEAD_S = 20;
 
 /**
- * Gapless: how long before the outgoing track's end the incoming one starts.
- * 0 starts it from the end latch; tune it (0 to 50) from the `[gapless] gap`
- * lines in the app log.
+ * Gapless: how long before the outgoing track's end the incoming one is
+ * started, to cover the time it takes to start making sound. QA measured
+ * about 100 ms from A's end to B's `playing` (Nov 10, round 16, Dark Side
+ * of the Moon); tune from the `[gapless] gap` lines in the app log.
  */
-export const GAPLESS_HEAD_START_MS = 0;
+export const GAPLESS_HEAD_START_MS = 90;
+/** B ramps up from 0 over this long, so a small overlap can't click. */
+export const GAPLESS_RAMP_MS = 15;
 
 /**
  * Where the current track actually stops: the earliest of the element's

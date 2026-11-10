@@ -18,6 +18,7 @@ import {
   fadeLength,
   fadeNow,
   GAPLESS_HEAD_START_MS,
+  GAPLESS_RAMP_MS,
   handoffBlocked,
   MIN_FADE_S,
   PREP_LEAD_S,
@@ -301,6 +302,8 @@ export function useAudioEngine() {
     fade: number;
     end: number;
     gainOut: number;
+    /** A gapless head start already advanced the store. */
+    fired?: boolean;
   } | null>(null);
   const fadeRef = useRef<{
     tail: HTMLVideoElement;
@@ -319,6 +322,11 @@ export function useAudioEngine() {
   // An element ramping to silence after a skip mid-fade; not reusable yet.
   const releasingRef = useRef<HTMLVideoElement | null>(null);
   const lastTimeUpdateAtRef = useRef(0);
+  // When the master really ended (its `ended`, or a timeupdate that saw
+  // it), for the gapless gap measurement. 0 until then.
+  const endedAtRef = useRef(0);
+  // B's 15 ms start ramp is running; the volume effect leaves it alone.
+  const rampingRef = useRef(false);
   const loudnessGainRef = useRef(1);
   const masterVolume = () => {
     const v = Math.max(0, Math.min(1, usePlaybackStore.getState().volume));
@@ -590,6 +598,8 @@ export function useAudioEngine() {
     const onEnded = trackEnd.onEnded;
     const onTimeUpdate = () => {
       lastTimeUpdateAtRef.current = performance.now();
+      if (el.ended && !endedAtRef.current)
+        endedAtRef.current = lastTimeUpdateAtRef.current;
       store().setPosition(el.currentTime);
       // End-guard for the double-length m4a header bug: correctedDuration
       // shows the LISTED length while the element claims ~2x (phantom
@@ -614,6 +624,7 @@ export function useAudioEngine() {
         !endGuardFiredRef.current
       ) {
         endGuardFiredRef.current = true;
+        if (!endedAtRef.current) endedAtRef.current = performance.now();
         // Rewind the element first: at the end of the queue (repeat off)
         // next() only stops — without this the element would sit parked
         // in the phantom zone and a later Play would resume silence.
@@ -759,6 +770,8 @@ export function useAudioEngine() {
       }
     };
     const onPlaying = () => {
+      // Playing again means it hasn't ended; an older end mark is stale.
+      endedAtRef.current = 0;
       consecutiveErrorsRef.current = 0;
       // Track played successfully — allow a fresh auto-retry if it later
       // fails again (e.g. a mid-stream drop on a much later replay).
@@ -808,7 +821,10 @@ export function useAudioEngine() {
     on(el, "timeupdate", onTimeUpdate);
     on(el, "durationchange", onDurationChange);
     on(el, "progress", onProgress);
-    on(el, "ended", onEnded);
+    on(el, "ended", () => {
+      if (!endedAtRef.current) endedAtRef.current = performance.now();
+      onEnded();
+    });
     on(el, "pause", onElPause);
     on(el, "play", onElPlay);
     on(el, "error", onError);
@@ -1124,16 +1140,68 @@ export function useAudioEngine() {
         };
         idle.volume = 0;
       } else {
-        emptyElement(out);
-        evictDegraded(streamVideoId);
-        idle.volume = masterVolume();
+        // Where A really ends: its own `ended` when that came first, else
+        // the handoff time plus what A had left (a head start lands
+        // before the end, and so can the end of a long outro).
+        const now = performance.now();
+        const left = out.paused ? 0 : Math.max(0, handoff.end - out.currentTime);
+        // Stopped already (its end, or the doubled-header guard's stop):
+        // measure from when that happened.
+        const stopped = out.paused && endedAtRef.current > 0;
+        // More than a head start left means a skip (Next while armed).
+        const playsOut = left > 0 && left * 1000 <= GAPLESS_HEAD_START_MS + 100;
+        const endAt = stopped
+          ? endedAtRef.current
+          : playsOut
+            ? now + left * 1000
+            : now;
+        const endFrom = stopped
+          ? "A's stop"
+          : playsOut
+            ? "handoff + time left"
+            : "skip, A stopped at the handoff";
+        const startSrc = idle.src;
         const lastUpdate = lastTimeUpdateAtRef.current;
+        endedAtRef.current = 0;
+        // A plays out what's left of a head start and stops at its end; on
+        // a skip it stops now.
+        const finish = () => {
+          if (releasingRef.current !== out) return;
+          releasingRef.current = null;
+          emptyElement(out);
+          // Only while B is still current; a skip's own load already
+          // dropped degraded copies, sparing its track.
+          if (audioRef.current === idle && idle.src === startSrc)
+            evictDegraded(streamVideoId);
+        };
+        releasingRef.current = out;
+        if (playsOut) {
+          out.addEventListener("ended", finish, { once: true });
+          window.setTimeout(finish, left * 1000);
+        } else {
+          finish();
+        }
+        idle.volume = 0;
+        rampingRef.current = true;
         idle.addEventListener(
           "playing",
-          () =>
+          () => {
+            // A skip may have loaded another track into this element.
+            if (idle.src !== startSrc || audioRef.current !== idle) return;
+            const at = performance.now();
             appLog(
-              `[gapless] gap ${Math.round(performance.now() - lastUpdate)}ms from the last timeupdate to playing`,
-            ),
+              `[gapless] gap ${Math.round(at - endAt)}ms from A's end (${endFrom}; negative is overlap), ${Math.round(at - lastUpdate)}ms from A's last timeupdate`,
+            );
+            // Up from 0 over GAPLESS_RAMP_MS, reading the slider as it goes.
+            const step = () => {
+              if (!rampingRef.current || audioRef.current !== idle) return;
+              const k = Math.min(1, (performance.now() - at) / GAPLESS_RAMP_MS);
+              idle.volume = masterVolume() * k;
+              if (k < 1) window.setTimeout(step, 4);
+              else rampingRef.current = false;
+            };
+            step();
+          },
           { once: true },
         );
       }
@@ -1144,6 +1212,11 @@ export function useAudioEngine() {
       return;
     }
     cutTail();
+    // A skip during B's start ramp: whatever loads next plays at full.
+    if (rampingRef.current) {
+      rampingRef.current = false;
+      el.volume = masterVolume();
+    }
     // Stop the previous track immediately. Without this the old src keeps
     // playing through the streamUrlFor() round-trip (~50–500 ms), so the
     // user hears the tail of track A bleed into the start of track B.
@@ -1774,8 +1847,12 @@ export function useAudioEngine() {
   useEffect(() => {
     const el = audioRef.current;
     if (!el) return;
-    // Mid-fade the crossfade tick sets both elements every few ms.
-    if (fadeRef.current) return;
+    // Mid-fade the crossfade tick sets both elements every few ms, and
+    // B's gapless start ramp sets the master's volume (not its mute).
+    if (fadeRef.current || rampingRef.current) {
+      el.muted = muted;
+      return;
+    }
     // <audio>.volume is linear amplitude (0..1), but loudness perception
     // is logarithmic — a linear slider crams almost all the perceivable
     // change into the bottom ~20% and 20–100% sounds nearly identical.
@@ -1844,6 +1921,17 @@ export function useAudioEngine() {
       const idle = idleRef.current;
       if (!el || !idle) return;
       const s = usePlaybackStore.getState();
+
+      // An outgoing element still playing out (a gapless head start, or a
+      // skip's 150 ms ramp) follows mute, and stops on a pause.
+      const r = releasingRef.current;
+      if (r) {
+        r.muted = s.muted;
+        if (!s.playing) {
+          releasingRef.current = null;
+          emptyElement(r);
+        }
+      }
 
       const f = fadeRef.current;
       if (f) {
@@ -1955,10 +2043,19 @@ export function useAudioEngine() {
       }
       if (!p.ready || !p.src) return;
 
-      if (handoffRef.current) {
-        // Gapless armed: the end latch advances, or the head start does.
-        if (pos >= end - GAPLESS_HEAD_START_MS / 1000 && GAPLESS_HEAD_START_MS)
+      const armed = handoffRef.current;
+      if (armed) {
+        // Gapless armed: the head start advances, or else the end latch.
+        // Once only: the store advancing reaches the resolve effect a
+        // render later, and this runs every 25 ms.
+        if (
+          !armed.fired &&
+          GAPLESS_HEAD_START_MS > 0 &&
+          pos >= end - GAPLESS_HEAD_START_MS / 1000
+        ) {
+          armed.fired = true;
           advanceAfterTrack();
+        }
         return;
       }
       // The rows' own lengths too: correctedDuration leaves a doubled
