@@ -607,13 +607,9 @@ const playbackStateCreator: StateCreator<PlaybackState> = (set, get) => ({
     // "loading" wouldn't, because its resolve effect keys on
     // [videoId, index] and neither changes here, leaving the finished
     // element paused and playback stalled on the loader.
-    // Songs passed over: disliked ones (with the setting on) and songs by an
-    // artist the listener hid. A passed-over current song isn't repeated.
-    const skipping = useSettingsStore.getState().skipDisliked;
-    const passOver = (t: QueueTrack | undefined) =>
-      !!t &&
-      ((skipping && isDisliked(t.videoId)) ||
-        (HIDE_ARTIST_SHIPPED && byHiddenArtist(t)));
+    // Songs passed over (see passedOver). A passed-over current song isn't
+    // repeated.
+    const passOver = passedOver;
     const replay = !passOver(queue[index]);
     if (
       replay &&
@@ -825,6 +821,28 @@ usePlaybackStore.subscribe((s) => {
  *  next, a new queue, an edit). For work that started from one queue and must
  *  not land over their choice, like a Shuffle still loading pages. The queue
  *  moving on by itself, radio appends and filled-in durations don't count. */
+/** Whether the queue passes over this song: disliked (with Skip disliked
+ *  on) or by an artist the listener hid. */
+export function passedOver(t: QueueTrack | undefined): boolean {
+  return (
+    !!t &&
+    ((useSettingsStore.getState().skipDisliked && isDisliked(t.videoId)) ||
+      (HIDE_ARTIST_SHIPPED && byHiddenArtist(t)))
+  );
+}
+
+/** Whether any song after `index` would play. Autoplay fetches more radio
+ *  when none would, as it does on the last song, so a passed-over tail
+ *  doesn't stop playback. */
+export function playableAfter(queue: QueueTrack[], index: number): boolean {
+  return playableLeft(queue, index) > 0;
+}
+
+/** How many songs after `index` would play. */
+export function playableLeft(queue: QueueTrack[], index: number): number {
+  return queue.slice(index + 1).filter((t) => !passedOver(t)).length;
+}
+
 export function noPickSince(): () => boolean {
   const picks = usePlaybackStore.getState().picks;
   return () => usePlaybackStore.getState().picks === picks;

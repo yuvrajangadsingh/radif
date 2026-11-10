@@ -14,7 +14,8 @@ vi.mock("@/lib/store/hidden-artists", async (importOriginal) => ({
   HIDE_ARTIST_SHIPPED: true,
 }));
 
-const { usePlaybackStore } = await import("@/lib/store/playback");
+const { usePlaybackStore, playableAfter } =
+  await import("@/lib/store/playback");
 const { useHiddenArtistsStore } = await import("@/lib/store/hidden-artists");
 const { usePinnedPlaylistsStore } =
   await import("@/lib/store/pinned-playlists");
@@ -78,5 +79,24 @@ describe("next() passes over hidden artists", () => {
     setup([track("a", "UC1"), track("b"), track("c", "UC2")], 0);
     usePlaybackStore.getState().next();
     expect(usePlaybackStore.getState().index).toBe(1);
+  });
+
+  it("sees a hidden tail as nothing left to play, so autoplay can step in", () => {
+    setup([track("a", "UC1"), track("b", "UCHIDDEN")], 0);
+    const { queue } = usePlaybackStore.getState();
+    expect(playableAfter(queue, 0)).toBe(false);
+    setup([track("a", "UC1"), track("b", "UCHIDDEN"), track("c", "UC2")], 0);
+    expect(playableAfter(usePlaybackStore.getState().queue, 0)).toBe(true);
+  });
+
+  it("counts a disliked tail the same way, only with Skip disliked on", async () => {
+    const { useDislikedStore } = await import("@/lib/store/disliked");
+    setup([track("a", "UC1"), track("d", "UC2")], 0);
+    useDislikedStore.setState({ ids: { d: true } });
+    const { queue } = usePlaybackStore.getState();
+    expect(playableAfter(queue, 0)).toBe(true);
+    useSettingsStore.setState({ skipDisliked: true });
+    expect(playableAfter(queue, 0)).toBe(false);
+    useDislikedStore.setState({ ids: {} });
   });
 });
