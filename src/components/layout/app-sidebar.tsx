@@ -24,6 +24,13 @@ import {
   ExternalLinkIcon,
   CheckIcon,
   RefreshCwIcon,
+  FolderIcon,
+  FolderOpenIcon,
+  FolderPlusIcon,
+  FolderMinusIcon,
+  ChevronRightIcon,
+  PencilIcon,
+  Trash2Icon,
 } from "lucide-react";
 import {
   Sidebar,
@@ -36,6 +43,7 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -53,8 +61,12 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import { Input } from "@/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -64,9 +76,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
+  FOLDERS_SHIPPED,
+  useFolders,
   useHidden,
   usePinned,
   usePinnedPlaylistsStore,
+  type PinnedPlaylist,
+  type PlaylistFolder,
 } from "@/lib/store/pinned-playlists";
 import { sidebarSections, type SidebarRow } from "@/lib/sidebar-rows";
 import { IS_BETA_PLATFORM } from "@/lib/platform";
@@ -108,6 +124,8 @@ const NAV_ITEMS = [
 const LIKED_ID = "VLLM";
 
 const MENU_BTN_CLS = "group-data-[collapsible=icon]:mx-auto";
+/** A folder's name when none is typed. */
+const NEW_FOLDER = "New folder";
 
 export function AppSidebar() {
   const { location } = useRouterState();
@@ -238,9 +256,10 @@ function SidebarPlaylists({
   const pin = usePinnedPlaylistsStore((s) => s.pin);
   const unpin = usePinnedPlaylistsStore((s) => s.unpin);
   const hide = usePinnedPlaylistsStore((s) => s.hide);
+  const folders = useFolders();
 
-  const rows = useMemo<SidebarRow[]>(() => {
-    const sections = sidebarSections({
+  const sections = useMemo(() => {
+    return sidebarSections({
       library: (library.data ?? [])
         .flatMap((s) => s.items)
         .map((it) => ({
@@ -250,11 +269,32 @@ function SidebarPlaylists({
         })),
       pinned,
       hidden,
-      folders: [],
+      folders: FOLDERS_SHIPPED ? folders : [],
       likedId: LIKED_ID,
     });
-    return [...sections.pinned, ...sections.rest];
-  }, [library.data, pinned, hidden]);
+  }, [library.data, pinned, hidden, folders]);
+
+  // The folder whose name is being typed in place (new or renamed). The
+  // field hides in the icon rail, so editing expands the sidebar first.
+  const [editingFolder, setEditingFolderState] = useState<string | null>(
+    null,
+  );
+  const { state: railState, setOpen: setSidebarOpen } = useSidebar();
+  const setEditingFolder = (id: string | null) => {
+    if (id && railState === "collapsed") setSidebarOpen(true);
+    setEditingFolderState(id);
+  };
+  const createFolder = usePinnedPlaylistsStore((s) => s.createFolder);
+  const renameFolder = usePinnedPlaylistsStore((s) => s.renameFolder);
+  const rowProps = {
+    isPlaylistOn,
+    pin,
+    unpin,
+    hide,
+    folders: FOLDERS_SHIPPED ? folders : [],
+    onNewFolder: (playlistId: string) =>
+      setEditingFolder(createFolder(NEW_FOLDER, playlistId)),
+  };
 
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -325,67 +365,38 @@ function SidebarPlaylists({
             </SidebarMenuButton>
           </SidebarMenuItem>
 
-          {rows.map((p) => (
-            <SidebarMenuItem key={p.id}>
-              <ContextMenu>
-                <ContextMenuTrigger asChild>
-                  <SidebarMenuButton
-                    asChild
-                    isActive={isPlaylistOn(p.id)}
-                    tooltip={p.title}
-                    className={MENU_BTN_CLS}
-                  >
-                    <Link to="/playlist/$id" params={{ id: p.id }}>
-                      {p.thumbnailUrl ? (
-                        <img
-                          src={p.thumbnailUrl}
-                          alt=""
-                          className="size-4 shrink-0 rounded-sm object-cover"
-                          loading="lazy"
-                        />
-                      ) : (
-                        <ListMusicIcon />
-                      )}
-                      <span className="min-w-0 flex-1 truncate">
-                        {p.title}
-                      </span>
-                      {/* Subtle marker so the pinned/unpinned boundary is
-                          legible — pinning's only visible effect is the
-                          reorder, this just explains it. */}
-                      {p.pinned ? (
-                        <PinIcon className="size-3! shrink-0 text-muted-foreground/70 group-data-[collapsible=icon]:hidden" />
-                      ) : null}
-                    </Link>
-                  </SidebarMenuButton>
-                </ContextMenuTrigger>
-                <ContextMenuContent>
-                  {p.pinned ? (
-                    <ContextMenuItem onSelect={() => unpin(p.id)}>
-                      <PinOffIcon />
-                      Unpin from sidebar
-                    </ContextMenuItem>
-                  ) : (
-                    <ContextMenuItem
-                      onSelect={() =>
-                        pin({
-                          id: p.id,
-                          title: p.title,
-                          thumbnailUrl: p.thumbnailUrl,
-                        })
-                      }
-                    >
-                      <PinIcon />
-                      Pin to sidebar
-                    </ContextMenuItem>
-                  )}
-                  <ContextMenuItem onSelect={() => hide(p.id)}>
-                    <EyeOffIcon />
-                    Hide from sidebar
-                  </ContextMenuItem>
-                </ContextMenuContent>
-              </ContextMenu>
-            </SidebarMenuItem>
-          ))}
+          {/* One keyed list, so a row moving between pinned, a folder and
+              the rest keeps its element (and the menu's focus return). */}
+          {[
+            ...sections.pinned.map((p) => (
+              <PlaylistRowItem key={p.id} row={p} {...rowProps} />
+            )),
+            ...sections.folders.flatMap(({ folder, rows }) => [
+              <FolderItem
+                key={folder.id}
+                folder={folder}
+                editing={editingFolder === folder.id}
+                onRename={() => setEditingFolder(folder.id)}
+                onNamed={(name) => {
+                  renameFolder(folder.id, name);
+                  setEditingFolder(null);
+                }}
+              />,
+              ...(folder.collapsed
+                ? []
+                : rows.map((p) => (
+                    <PlaylistRowItem
+                      key={p.id}
+                      row={p}
+                      folderId={folder.id}
+                      {...rowProps}
+                    />
+                  ))),
+            ]),
+            ...sections.rest.map((p) => (
+              <PlaylistRowItem key={p.id} row={p} {...rowProps} />
+            )),
+          ]}
 
           {/* A failed browse used to be invisible: the rows above read
               `library.data ?? []`, so a launch before the network was up
@@ -415,6 +426,233 @@ function SidebarPlaylists({
         </SidebarMenu>
       </SidebarGroupContent>
     </SidebarGroup>
+  );
+}
+
+/** One playlist row with its context menu. */
+function PlaylistRowItem({
+  row: p,
+  folderId,
+  folders,
+  isPlaylistOn,
+  pin,
+  unpin,
+  hide,
+  onNewFolder,
+}: {
+  row: SidebarRow;
+  /** Set when the row sits inside a folder. */
+  folderId?: string;
+  folders: PlaylistFolder[];
+  isPlaylistOn: (id: string) => boolean;
+  pin: (p: PinnedPlaylist) => void;
+  unpin: (id: string) => void;
+  hide: (id: string) => void;
+  onNewFolder: (playlistId: string) => void;
+}) {
+  const moveToFolder = usePinnedPlaylistsStore((s) => s.moveToFolder);
+  const removeFromFolder = usePinnedPlaylistsStore((s) => s.removeFromFolder);
+  // New folder opens a name field; the closing menu must not pull focus
+  // back to the row and so blur (and save) the field at once.
+  const toField = useRef(false);
+  return (
+    <SidebarMenuItem className={folderId ? "ps-3 group-data-[collapsible=icon]:hidden" : undefined}>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <SidebarMenuButton
+            asChild
+            isActive={isPlaylistOn(p.id)}
+            tooltip={p.title}
+            className={MENU_BTN_CLS}
+          >
+            <Link to="/playlist/$id" params={{ id: p.id }}>
+              {p.thumbnailUrl ? (
+                <img
+                  src={p.thumbnailUrl}
+                  alt=""
+                  className="size-4 shrink-0 rounded-sm object-cover"
+                  loading="lazy"
+                />
+              ) : (
+                <ListMusicIcon />
+              )}
+              <span className="min-w-0 flex-1 truncate">
+                {p.title}
+              </span>
+              {/* Subtle marker so the pinned/unpinned boundary is
+                  legible — pinning's only visible effect is the
+                  reorder, this just explains it. */}
+              {p.pinned ? (
+                <PinIcon className="size-3! shrink-0 text-muted-foreground/70 group-data-[collapsible=icon]:hidden" />
+              ) : null}
+            </Link>
+          </SidebarMenuButton>
+        </ContextMenuTrigger>
+        <ContextMenuContent
+          onCloseAutoFocus={(e) => {
+            if (toField.current) e.preventDefault();
+            toField.current = false;
+          }}
+        >
+          {p.pinned ? (
+            <ContextMenuItem onSelect={() => unpin(p.id)}>
+              <PinOffIcon />
+              Unpin from sidebar
+            </ContextMenuItem>
+          ) : (
+            <ContextMenuItem
+              onSelect={() =>
+                pin({
+                  id: p.id,
+                  title: p.title,
+                  thumbnailUrl: p.thumbnailUrl,
+                })
+              }
+            >
+              <PinIcon />
+              Pin to sidebar
+            </ContextMenuItem>
+          )}
+          {/* Only library playlists can be filed: a folder's ids are
+              pruned against the library fetch. */}
+          {FOLDERS_SHIPPED && p.inLibrary ? (
+            <ContextMenuSub>
+              <ContextMenuSubTrigger>
+                <FolderIcon />
+                Move to folder
+              </ContextMenuSubTrigger>
+              <ContextMenuSubContent className="max-h-[min(24rem,var(--radix-context-menu-content-available-height))] overflow-auto">
+                {folders
+                  .filter((f) => f.id !== folderId)
+                  .map((f) => (
+                    <ContextMenuItem
+                      key={f.id}
+                      onSelect={() => moveToFolder(p.id, f.id)}
+                    >
+                      <FolderIcon />
+                      <span className="max-w-48 truncate">{f.name}</span>
+                    </ContextMenuItem>
+                  ))}
+                <ContextMenuItem
+                  onSelect={() => {
+                    toField.current = true;
+                    onNewFolder(p.id);
+                  }}
+                >
+                  <FolderPlusIcon />
+                  New folder…
+                </ContextMenuItem>
+              </ContextMenuSubContent>
+            </ContextMenuSub>
+          ) : null}
+          {folderId ? (
+            <ContextMenuItem onSelect={() => removeFromFolder(p.id)}>
+              <FolderMinusIcon />
+              Remove from folder
+            </ContextMenuItem>
+          ) : null}
+          <ContextMenuItem onSelect={() => hide(p.id)}>
+            <EyeOffIcon />
+            Hide from sidebar
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
+    </SidebarMenuItem>
+  );
+}
+
+/** A folder row: click to open or close it, right-click to rename or
+ *  delete. Its playlists (siblings after it) hide in the icon rail. */
+function FolderItem({
+  folder,
+  editing,
+  onRename,
+  onNamed,
+}: {
+  folder: PlaylistFolder;
+  editing: boolean;
+  onRename: () => void;
+  /** The typed name, already trimmed and defaulted. */
+  onNamed: (name: string) => void;
+}) {
+  const toggle = usePinnedPlaylistsStore((s) => s.toggleFolder);
+  const remove = usePinnedPlaylistsStore((s) => s.deleteFolder);
+  const open = !folder.collapsed;
+  // Once per edit: Escape, then the blur some engines fire as the field
+  // unmounts, must not save what was typed.
+  const settled = useRef(false);
+  const toField = useRef(false);
+  if (editing) {
+    // Typed in place, like the rest of the sidebar.
+    const done = (value: string) => {
+      if (settled.current) return;
+      settled.current = true;
+      onNamed(value.trim() || NEW_FOLDER);
+    };
+    return (
+      <SidebarMenuItem className="group-data-[collapsible=icon]:hidden">
+        <Input
+          autoFocus
+          aria-label="Folder name"
+          defaultValue={folder.name}
+          maxLength={60}
+          className="h-8 text-sm"
+          onFocus={(e) => {
+            settled.current = false;
+            e.currentTarget.select();
+          }}
+          onBlur={(e) => done(e.currentTarget.value)}
+          onKeyDown={(e) => {
+            // Not while an input method is composing: Enter confirms that.
+            // Older WebKit reports keyCode 229 instead of isComposing.
+            const composing =
+              e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229;
+            if (e.key === "Enter" && !composing) e.currentTarget.blur();
+            else if (e.key === "Escape") done(folder.name);
+          }}
+        />
+      </SidebarMenuItem>
+    );
+  }
+  return (
+    <SidebarMenuItem>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <SidebarMenuButton
+            tooltip={folder.name}
+            className={MENU_BTN_CLS}
+            aria-expanded={open}
+            onClick={() => toggle(folder.id)}
+          >
+            {open ? <FolderOpenIcon /> : <FolderIcon />}
+            <span className="min-w-0 flex-1 truncate">{folder.name}</span>
+            <ChevronRightIcon
+              className={`size-3! shrink-0 text-muted-foreground/70 transition-transform group-data-[collapsible=icon]:hidden ${open ? "rotate-90" : ""}`}
+            />
+          </SidebarMenuButton>
+        </ContextMenuTrigger>
+        <ContextMenuContent
+          onCloseAutoFocus={(e) => {
+            if (toField.current) e.preventDefault();
+            toField.current = false;
+          }}
+        >
+          <ContextMenuItem
+            onSelect={() => {
+              toField.current = true;
+              onRename();
+            }}
+          >
+            <PencilIcon />
+            Rename folder
+          </ContextMenuItem>
+          <ContextMenuItem onSelect={() => remove(folder.id)}>
+            <Trash2Icon />
+            Delete folder
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
+    </SidebarMenuItem>
   );
 }
 
