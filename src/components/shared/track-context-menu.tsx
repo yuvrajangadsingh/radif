@@ -1,8 +1,10 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ComponentType,
+  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from "react";
 import { useNavigate } from "@tanstack/react-router";
@@ -340,6 +342,14 @@ export function TrackMenuItems({
 
   const artist = item.artists?.find((a) => !!a.id);
   const disliked = useDislikedStore((s) => !!s.ids[item.id]);
+  // Filters "Add to playlist" by title; with 40 playlists the list scrolls
+  // past what anyone wants to hunt through.
+  const [playlistQuery, setPlaylistQuery] = useState("");
+  const findRef = useRef<HTMLInputElement>(null);
+  const wanted = playlistQuery.trim().toLowerCase();
+  const shownPlaylists = (playlists.data ?? []).filter(
+    (p) => !wanted || p.title.toLowerCase().includes(wanted),
+  );
 
   // Home cards ship no album anywhere in their payload, so fall back to a
   // /next lookup. Menu content only mounts while the menu is open, so this
@@ -440,11 +450,62 @@ export function TrackMenuItems({
               No playlists yet.
             </div>
           ) : (
-            (playlists.data ?? []).map((p) => (
-              <Item key={p.id} onSelect={() => runAddToPlaylist(p)}>
-                <span className="truncate">{p.title}</span>
-              </Item>
-            ))
+            <>
+              <div className="sticky top-0 z-10 bg-popover p-1">
+                <Input
+                  ref={findRef}
+                  autoFocus
+                  value={playlistQuery}
+                  onChange={(e) => setPlaylistQuery(e.target.value)}
+                  // The menu's type-ahead would take the letters, and it
+                  // doesn't see this box as an item: Down moves to the first
+                  // match, Enter adds to it, Escape still closes.
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") return;
+                    e.stopPropagation();
+                    // WebKit can send the IME's confirming Enter as keyCode 229.
+                    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+                    if (e.key === "ArrowDown" && shownPlaylists.length > 0) {
+                      e.preventDefault();
+                      e.currentTarget
+                        .closest<HTMLElement>("[role=menu]")
+                        ?.querySelector<HTMLElement>("[role=menuitem]")
+                        ?.focus();
+                    } else if (e.key === "Enter" && shownPlaylists[0]) {
+                      e.preventDefault();
+                      void runAddToPlaylist(shownPlaylists[0]);
+                    }
+                  }}
+                  placeholder="Find a playlist"
+                  aria-label="Find a playlist"
+                  className="h-8"
+                />
+              </div>
+              {shownPlaylists.length === 0 ? (
+                <div className="px-2 py-1.5 text-sm text-muted-foreground">
+                  No playlist matches.
+                </div>
+              ) : (
+                shownPlaylists.map((p, i) => (
+                  <Item
+                    key={p.id}
+                    onSelect={() => runAddToPlaylist(p)}
+                    // Up from the first match goes back to the box.
+                    onKeyDown={
+                      i === 0
+                        ? (e: ReactKeyboardEvent) => {
+                            if (e.key !== "ArrowUp") return;
+                            e.preventDefault();
+                            findRef.current?.focus();
+                          }
+                        : undefined
+                    }
+                  >
+                    <span className="truncate">{p.title}</span>
+                  </Item>
+                ))
+              )}
+            </>
           )}
           <Separator />
           <Item onSelect={() => setNewPlaylistOpen(true)}>
