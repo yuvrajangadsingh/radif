@@ -70,6 +70,7 @@ import {
 } from "@/lib/innertube/mutations";
 import { usePlaybackStore } from "@/lib/store/playback";
 import type { ShelfItem } from "@/lib/innertube/types";
+import { invalidateLikedLists } from "@/lib/liked-cache";
 import { syncLastfmLove } from "@/lib/lastfm";
 
 type TrackContext = { tracks: ShelfItem[]; index: number };
@@ -161,6 +162,7 @@ export function useTrackMenuController(item: ShelfItem) {
           ...list,
         ];
       });
+      invalidateLikedLists(qc);
       toast.success("Added to Liked songs");
       syncLastfmLove(item, true);
     } catch (e) {
@@ -173,6 +175,7 @@ export function useTrackMenuController(item: ShelfItem) {
       qc.setQueryData<ShelfItem[]>(["liked-songs"], (old) =>
         (old ?? []).filter((t) => t.id !== item.id),
       );
+      invalidateLikedLists(qc);
       toast.success("Removed from Liked songs");
       syncLastfmLove(item, false);
     } catch (e) {
@@ -185,6 +188,7 @@ export function useTrackMenuController(item: ShelfItem) {
       qc.setQueryData<ShelfItem[]>(["liked-songs"], (old) =>
         (old ?? []).filter((t) => t.id !== item.id),
       );
+      invalidateLikedLists(qc);
       toast.success("Marked as not interested");
       syncLastfmLove(item, false);
     } catch (e) {

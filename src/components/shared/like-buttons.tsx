@@ -7,6 +7,7 @@ import { fetchLikedSongs } from "@/lib/innertube/library";
 import { likeTrack, removeRating } from "@/lib/innertube/mutations";
 import type { ShelfItem } from "@/lib/innertube/types";
 import { syncLastfmLove, type LastfmTrackMeta } from "@/lib/lastfm";
+import { invalidateLikedLists } from "@/lib/liked-cache";
 import { cn } from "@/lib/utils";
 
 // Patch the cached liked-songs list optimistically. The server is the
@@ -101,18 +102,7 @@ export function LikeDislikeButtons({
       }
       // Mirror the like/unlike to Last.fm as a loved / unloved track.
       syncLastfmLove(track, !wasLiked);
-      // The heart-fill cache (["liked-songs"]) is separate from the
-      // Library → Songs list (["library","liked-songs-pages"]) and the
-      // Liked Songs (LM) playlist page (["playlist-pages", …"LM"…]). Mark
-      // those stale so they don't keep showing an outdated list. They're
-      // heavy infinite queries, so invalidate only refetches if mounted.
-      void qc.invalidateQueries({ queryKey: ["library", "liked-songs-pages"] });
-      void qc.invalidateQueries({
-        predicate: (q) =>
-          q.queryKey[0] === "playlist-pages-v2" &&
-          typeof q.queryKey[1] === "string" &&
-          (q.queryKey[1] as string).includes("LM"),
-      });
+      invalidateLikedLists(qc);
     } catch (err) {
       toast.error(String(err));
     } finally {
