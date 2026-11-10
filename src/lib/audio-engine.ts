@@ -245,6 +245,16 @@ function playLocal(el: HTMLMediaElement | null | undefined): Promise<void> {
   return p;
 }
 
+/** Drop the cached copies that fell back to the anonymous resolve, except
+ *  `keep`'s (a stream id). Local, fire-and-forget. */
+function evictDegraded(keep: string): void {
+  void getStreamBaseUrl()
+    .then((base) =>
+      fetch(`${base}/degraded/evict?keep=${encodeURIComponent(keep)}`),
+    )
+    .catch(() => {});
+}
+
 export function useAudioEngine() {
   // The master: the element everything reads and drives. It can swap with
   // idleRef at a crossfade or gapless handoff, so read it at use time.
@@ -348,6 +358,44 @@ export function useAudioEngine() {
     const el = audioRef.current;
     if (el) el.volume = masterVolume();
     appLog("[crossfade] cut by a skip");
+  };
+  /** Start a freshly loaded master, recovering from WebKit aborting the
+   *  play() while the track is still current. */
+  const playOrRecover = (el: HTMLVideoElement, token: number) => {
+    void playLocal(el).catch((e) => {
+      // AbortError from a NEW load (user skipped mid-start) is
+      // harmless: the token is stale and the next resolve owns
+      // playback. But WebKit also aborts a pending play() when
+      // the page goes hidden before playback starts, leaving the
+      // element paused with the store still wanting playback —
+      // proven in the log 2026-08-31 14:18:36: play() rejected
+      // AbortError on the visibility flip, canplay two seconds
+      // later, silence (the desktop-switch stall). The token
+      // still being current tells those cases apart. Starting
+      // while hidden is allowed (queue auto-advance does it), so
+      // retry once the element can play.
+      if (e?.name === "AbortError") {
+        if (token !== resolveTokenRef.current) return;
+        if (!usePlaybackStore.getState().playing) return;
+        appLog(
+          "play() aborted with track still current; retrying at canplay",
+        );
+        const retry = () => {
+          if (token !== resolveTokenRef.current) return;
+          if (!usePlaybackStore.getState().playing) return;
+          void playLocal(el).catch(() => {});
+        };
+        if (el.readyState >= 3) retry();
+        else el.addEventListener("canplay", retry, { once: true });
+        return;
+      }
+      if (import.meta.env.DEV) {
+        console.error("[audio] play() rejected:", e);
+      }
+      usePlaybackStore
+        .getState()
+        .setStatus("error", e?.message ?? String(e));
+    });
   };
   // Counts how many tracks have failed in a row without a successful
   // play in between. Reset to 0 on `playing`. Used to short-circuit
@@ -1237,13 +1285,7 @@ export function useAudioEngine() {
         // `keep` is the STREAM id, not the queue id: a song playing from
         // its video counterpart (or the reverse) streams under a different
         // id, and sparing the queue id would delete the file being read.
-        void getStreamBaseUrl()
-          .then((base) =>
-            fetch(
-              `${base}/degraded/evict?keep=${encodeURIComponent(streamVideoId ?? videoId ?? "")}`,
-            ),
-          )
-          .catch(() => {});
+        evictDegraded(streamVideoId ?? videoId ?? "");
         const hold = videoHoldRef.current;
         if (hold && hold.token === token) {
           el.addEventListener(
@@ -1259,42 +1301,7 @@ export function useAudioEngine() {
           );
           return;
         }
-        if (usePlaybackStore.getState().playing) {
-          void playLocal(el).catch((e) => {
-            // AbortError from a NEW load (user skipped mid-start) is
-            // harmless: the token is stale and the next resolve owns
-            // playback. But WebKit also aborts a pending play() when
-            // the page goes hidden before playback starts, leaving the
-            // element paused with the store still wanting playback —
-            // proven in the log 2026-08-31 14:18:36: play() rejected
-            // AbortError on the visibility flip, canplay two seconds
-            // later, silence (the desktop-switch stall). The token
-            // still being current tells those cases apart. Starting
-            // while hidden is allowed (queue auto-advance does it), so
-            // retry once the element can play.
-            if (e?.name === "AbortError") {
-              if (token !== resolveTokenRef.current) return;
-              if (!usePlaybackStore.getState().playing) return;
-              appLog(
-                "play() aborted with track still current; retrying at canplay",
-              );
-              const retry = () => {
-                if (token !== resolveTokenRef.current) return;
-                if (!usePlaybackStore.getState().playing) return;
-                void playLocal(el).catch(() => {});
-              };
-              if (el.readyState >= 3) retry();
-              else el.addEventListener("canplay", retry, { once: true });
-              return;
-            }
-            if (import.meta.env.DEV) {
-              console.error("[audio] play() rejected:", e);
-            }
-            usePlaybackStore
-              .getState()
-              .setStatus("error", e?.message ?? String(e));
-          });
-        }
+        if (usePlaybackStore.getState().playing) playOrRecover(el, token);
       })
       .catch((e: Error) => {
         if (token !== resolveTokenRef.current) return;
