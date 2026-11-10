@@ -5,9 +5,12 @@
  * `is_logged_in` (does the jar hold credentials this client can sign
  * with), YouTube's `/account_menu` (does the session still
  * authenticate), and the account rows stored on disk. Every one of them
- * can also fail to answer at all, and on macOS that happens routinely:
- * the AES key lives in the login keychain, so a jar read during a dark
- * wake fails the same way a dropped connection does.
+ * can also fail to answer at all: a jar that can't be read or decrypted,
+ * a dropped connection, a storage error. (The jar's AES key was in the
+ * login keychain, where a dark-wake read failed; on macOS it's now a file
+ * in the app's data folder, see `encryption_key` in lib.rs, with the
+ * keychain read only when that file is missing. On Linux it's still the
+ * system credential store.)
  *
  * Folding "no answer" into "signed out" is what put a Sign in button in
  * front of users who were signed in the whole time. So a failure gets

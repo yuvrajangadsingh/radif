@@ -277,7 +277,7 @@ pub const STATE_SIGNED_OUT: &str = "signed_out";
 
 /// What we can honestly say about the stored session.
 ///
-/// A boolean cannot hold this. "The login keychain would not open" and
+/// A boolean cannot hold this. "The jar could not be read" and
 /// "the jar holds no credentials" are different answers, and only the
 /// second one may render a sign-in button — on a dark wake the first one
 /// used to render it to a perfectly signed-in user.
@@ -330,9 +330,12 @@ impl AuthStatus {
 /// True when a failure means "the desktop session is not available right
 /// now", not "the stored session is gone".
 ///
-/// The measured macOS case is a dark wake: the jar's AES key lives in the
-/// login keychain and reading it needs a UI session, so the keyring layer
-/// answers `Platform failure: In dark wake, no UI possible`. Counting that
+/// The measured macOS case was a dark wake, when the jar's AES key was in
+/// the login keychain and reading it needed a UI session, so the keyring
+/// layer answered `Platform failure: In dark wake, no UI possible`. On macOS
+/// the key is now a file (`encryption_key` in lib.rs); the keychain is read
+/// only when that file is missing (the migration, or a first run); Linux
+/// still uses its credential store. Counting that
 /// as a session failure would advance the retry counter, log a re-login
 /// warning, and — worst — let a caller report the user as signed out.
 pub fn is_environment_unavailable(err: &str) -> bool {
