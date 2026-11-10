@@ -349,7 +349,7 @@ function SidebarPlaylists({
               className={MENU_BTN_CLS}
             >
               <Link to="/playlist/$id" params={{ id: LIKED_ID }}>
-                <HeartIcon className="fill-rose-500 text-rose-500" />
+                <HeartIcon className="fill-current text-brand" />
                 <span>Liked songs</span>
               </Link>
             </SidebarMenuButton>
