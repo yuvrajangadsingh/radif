@@ -1,6 +1,11 @@
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { invoke } from "@tauri-apps/api/core";
-import type { ShelfItem, ShelfMore, Thumbnail } from "./types";
+import type {
+  MinimalArtist,
+  ShelfItem,
+  ShelfMore,
+  Thumbnail,
+} from "./types";
 import { appLog } from "@/lib/app-log";
 
 export type YtNode = Record<string, any>;
@@ -948,7 +953,7 @@ export function mapTwoRowItem(raw: YtNode): ShelfItem | null {
   // display, but populating `artists` lets the player card render
   // each artist as a clickable link instead of inert text.
   const subtitleRuns: YtNode[] = raw.subtitle?.runs ?? [];
-  const artists: { id?: string; name: string }[] = [];
+  const artists: MinimalArtist[] = [];
   for (const run of subtitleRuns) {
     const browseId = run.navigationEndpoint?.browseEndpoint?.browseId as
       string | undefined;
@@ -1035,7 +1040,7 @@ export function mapTwoRowItem(raw: YtNode): ShelfItem | null {
   // id but no name, and the card's subtitle is the whole byline
   // ("Nanku, Karun & Bhuvan"), not one artist's name.
   if (menuNav.artistId && !artists.some((a) => a.id)) {
-    artists.push({ id: menuNav.artistId, name: subtitle });
+    artists.push({ id: menuNav.artistId, name: subtitle, bylineOnly: true });
   }
 
   return {

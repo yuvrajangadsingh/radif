@@ -6,10 +6,15 @@ import {
 } from "zustand/middleware";
 import { emit } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import type { ShelfItem, Thumbnail } from "@/lib/innertube/types";
+import type {
+  MinimalArtist,
+  ShelfItem,
+  Thumbnail,
+} from "@/lib/innertube/types";
 import { isFloatingPlayerWindow } from "@/lib/floating-player";
 import { isCasting } from "@/lib/store/cast";
 import { isDisliked } from "@/lib/store/disliked";
+import { byHiddenArtist, HIDE_ARTIST_SHIPPED } from "@/lib/store/hidden-artists";
 import { useSettingsStore } from "@/lib/store/settings";
 import { safeLocalStorage } from "./safe-storage";
 
@@ -32,7 +37,7 @@ export type QueueTrack = {
   videoId: string;
   title: string;
   subtitle?: string;
-  artists?: { id?: string; name: string }[];
+  artists?: MinimalArtist[];
   album?: string;
   /** Browse id ("MPREb_…") behind "Go to album" in the player menu. */
   albumId?: string;
@@ -602,9 +607,10 @@ const playbackStateCreator: StateCreator<PlaybackState> = (set, get) => ({
     // "loading" wouldn't, because its resolve effect keys on
     // [videoId, index] and neither changes here, leaving the finished
     // element paused and playback stalled on the loader.
-    // A disliked current song isn't repeated; it moves on like any other.
-    const skipping = useSettingsStore.getState().skipDisliked;
-    const replay = !(skipping && isDisliked(queue[index]?.videoId ?? ""));
+    // Songs passed over (see passedOver). A passed-over current song isn't
+    // repeated.
+    const passOver = passedOver;
+    const replay = !passOver(queue[index]);
     if (
       replay &&
       (repeat === "one" || (repeat === "all" && queue.length === 1))
@@ -629,17 +635,15 @@ const playbackStateCreator: StateCreator<PlaybackState> = (set, get) => ({
       nextQueue = shuffle && queue.length > 1 ? fisherYates(queue) : queue;
       nextIndex = 0;
     }
-    // Pass over disliked songs; a queue of nothing else stops.
-    if (skipping) {
-      for (let hops = 0; isDisliked(nextQueue[nextIndex].videoId); hops++) {
-        // Two passes: a wrap may reshuffle mid-scan.
-        if (hops >= 2 * nextQueue.length) return stop();
-        nextIndex++;
-        if (nextIndex >= nextQueue.length) {
-          if (repeat !== "all") return stop();
-          if (shuffle && nextQueue === queue) nextQueue = fisherYates(queue);
-          nextIndex = 0;
-        }
+    // Pass over them; a queue of nothing else stops.
+    for (let hops = 0; passOver(nextQueue[nextIndex]); hops++) {
+      // Two passes: a wrap may reshuffle mid-scan.
+      if (hops >= 2 * nextQueue.length) return stop();
+      nextIndex++;
+      if (nextIndex >= nextQueue.length) {
+        if (repeat !== "all") return stop();
+        if (shuffle && nextQueue === queue) nextQueue = fisherYates(queue);
+        nextIndex = 0;
       }
     }
     // Only the current song is left to play (repeat all): replay it in place,
@@ -817,6 +821,28 @@ usePlaybackStore.subscribe((s) => {
  *  next, a new queue, an edit). For work that started from one queue and must
  *  not land over their choice, like a Shuffle still loading pages. The queue
  *  moving on by itself, radio appends and filled-in durations don't count. */
+/** Whether the queue passes over this song: disliked (with Skip disliked
+ *  on) or by an artist the listener hid. */
+export function passedOver(t: QueueTrack | undefined): boolean {
+  return (
+    !!t &&
+    ((useSettingsStore.getState().skipDisliked && isDisliked(t.videoId)) ||
+      (HIDE_ARTIST_SHIPPED && byHiddenArtist(t)))
+  );
+}
+
+/** Whether any song after `index` would play. Autoplay fetches more radio
+ *  when none would, as it does on the last song, so a passed-over tail
+ *  doesn't stop playback. */
+export function playableAfter(queue: QueueTrack[], index: number): boolean {
+  return playableLeft(queue, index) > 0;
+}
+
+/** How many songs after `index` would play. */
+export function playableLeft(queue: QueueTrack[], index: number): number {
+  return queue.slice(index + 1).filter((t) => !passedOver(t)).length;
+}
+
 export function noPickSince(): () => boolean {
   const picks = usePlaybackStore.getState().picks;
   return () => usePlaybackStore.getState().picks === picks;
