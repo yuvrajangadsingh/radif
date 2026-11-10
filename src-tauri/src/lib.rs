@@ -2689,6 +2689,58 @@ async fn close_player_window(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// The collection-behaviour bits set_player_on_top added (and so may take
+/// away again), leaving any the window had before alone.
+#[cfg(target_os = "macos")]
+static PLAYER_ADDED_BEHAVIOUR: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+/// Main thread only. Looks the window up here, so a player closed while
+/// this was queued is simply not there.
+#[cfg(target_os = "macos")]
+fn player_over_fullscreen(app: &tauri::AppHandle, on: bool) {
+    use objc2_app_kit::{NSWindow, NSWindowCollectionBehavior as B};
+    use std::sync::atomic::Ordering;
+    let Some(win) = app.get_webview_window("player") else {
+        return;
+    };
+    let Ok(ptr) = win.ns_window() else {
+        return;
+    };
+    // SAFETY: the window is open (just looked up) and this is the main
+    // thread, the only one AppKit allows.
+    let w = unsafe { &*(ptr as *const NSWindow) };
+    let current = w.collectionBehavior().0;
+    let next = if on {
+        let wanted = (B::CanJoinAllSpaces | B::FullScreenAuxiliary).0;
+        PLAYER_ADDED_BEHAVIOUR.fetch_or(wanted & !current, Ordering::Relaxed);
+        current | wanted
+    } else {
+        current & !PLAYER_ADDED_BEHAVIOUR.swap(0, Ordering::Relaxed)
+    };
+    w.setCollectionBehavior(B(next));
+}
+
+/// Keep the floating player above other windows, and on macOS try to show
+/// it over other apps' full-screen Spaces too (the notch's collection
+/// behaviour, see notch.rs), or put it back to a normal window. Unverified:
+/// the notch is an NSPanel, this is an ordinary NSWindow, and Tauri's
+/// issue 9556 says the flags alone may not be enough for one.
+#[tauri::command]
+async fn set_player_on_top(app: tauri::AppHandle, on: bool) -> Result<(), String> {
+    let win = app
+        .get_webview_window("player")
+        .ok_or_else(|| "no player window".to_string())?;
+    win.set_always_on_top(on).map_err(|e| e.to_string())?;
+    #[cfg(target_os = "macos")]
+    {
+        let app2 = app.clone();
+        app.run_on_main_thread(move || player_over_fullscreen(&app2, on))
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 /// Sign the user out of every account they've added. Wipes the
 /// accounts index, removes each per-account cookies dir, and emits
 /// `accounts-changed` so the UI can collapse back to the signed-out
@@ -5564,6 +5616,7 @@ pub fn run() {
             open_player_window,
             notch::notch_set_enabled,
             close_player_window,
+            set_player_on_top,
             set_now_playing,
             set_playback_activity,
             frontend_log,

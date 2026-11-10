@@ -21,6 +21,10 @@ import {
 import { useLayoutStore } from "@/lib/store/layout";
 import { useSettingsStore } from "@/lib/store/settings";
 import { cn } from "@/lib/utils";
+
+/** The pin also shows the window over other apps' full-screen Spaces.
+ *  Ships hidden until QA passes it; delete in the release that ships it. */
+export const FLOAT_OVER_FULLSCREEN_SHIPPED = false;
 import { queryClient } from "@/lib/query-client";
 
 // Wire the store's user-facing actions to emit Tauri events instead of
@@ -92,6 +96,13 @@ function FloatingTitleBar() {
   // mount (so a pinned window stays pinned after a close/reopen)
   // and whenever the toggle flips.
   useEffect(() => {
+    if (FLOAT_OVER_FULLSCREEN_SHIPPED) {
+      // On top and over full-screen apps; unpinned, a normal window again.
+      invoke("set_player_on_top", { on: pinned }).catch((e) =>
+        console.error("[floating] set_player_on_top failed:", e),
+      );
+      return;
+    }
     void getCurrentWindow()
       .setAlwaysOnTop(pinned)
       .catch((e) => console.error("[floating] setAlwaysOnTop failed:", e));
