@@ -11,7 +11,18 @@ import {
   streamUrlFor,
 } from "@/lib/stream";
 import { useLoudnessGain } from "@/lib/loudness";
-import { advanceAfterTrack } from "@/lib/sleep-timer";
+import { advanceAfterTrack, useSleepTimer } from "@/lib/sleep-timer";
+import {
+  effectiveEnd,
+  fadeGains,
+  fadeLength,
+  fadeNow,
+  GAPLESS_HEAD_START_MS,
+  handoffBlocked,
+  MIN_FADE_S,
+  PREP_LEAD_S,
+  SKIP_RAMP_MS,
+} from "@/lib/crossfade";
 import { followSlot, type PlayingSlot } from "@/lib/playing-slot";
 import { usePlaybackStore, type QueueTrack } from "@/lib/store/playback";
 import { videoQualityTier } from "@/lib/video-quality-tier";
@@ -235,8 +246,21 @@ function playLocal(el: HTMLMediaElement | null | undefined): Promise<void> {
   return p;
 }
 
+/** Drop the cached copies that fell back to the anonymous resolve, except
+ *  `keep`'s (a stream id). Local, fire-and-forget. */
+function evictDegraded(keep: string): void {
+  void getStreamBaseUrl()
+    .then((base) =>
+      fetch(`${base}/degraded/evict?keep=${encodeURIComponent(keep)}`),
+    )
+    .catch(() => {});
+}
+
 export function useAudioEngine() {
+  // The master: the element everything reads and drives. It can swap with
+  // idleRef at a crossfade or gapless handoff, so read it at use time.
   const audioRef = useRef<HTMLVideoElement | null>(null);
+  const idleRef = useRef<HTMLVideoElement | null>(null);
   // Guard against stale stream resolutions when the user skips mid-fetch.
   const resolveTokenRef = useRef(0);
   // Position continuity across same-track reloads (song<->video source
@@ -256,6 +280,131 @@ export function useAudioEngine() {
   const loadedSlotRef = useRef<{ videoId?: string; slot: number } | null>(
     null,
   );
+  // Crossfade and gapless (lib/crossfade.ts). prep: the next track loading
+  // into the idle element. handoff: set just before the store advances and
+  // taken by the resolve effect, which swaps the elements instead of
+  // loading (adopt). fade: the outgoing element playing out its fade.
+  const prepRef = useRef<{
+    gen: number;
+    slot: number;
+    streamId: string;
+    src?: string;
+    ready: boolean;
+  } | null>(null);
+  const prepGenRef = useRef(0);
+  const prepRetryAtRef = useRef(0);
+  const handoffRef = useRef<{
+    slot: number;
+    streamId: string;
+    src: string;
+    /** Fade seconds; 0 is a gapless start. */
+    fade: number;
+    end: number;
+    gainOut: number;
+  } | null>(null);
+  const fadeRef = useRef<{
+    tail: HTMLVideoElement;
+    from: number;
+    length: number;
+    end: number;
+    gainOut: number;
+    /** The incoming stream id, spared when degraded copies are dropped
+     *  once the outgoing file is no longer being read. A skip mid-fade
+     *  leaves that to the normal load it starts. */
+    keep: string;
+    /** Stall check: the outgoing clock's last value and when it changed. */
+    lastT: number;
+    movedAt: number;
+  } | null>(null);
+  // An element ramping to silence after a skip mid-fade; not reusable yet.
+  const releasingRef = useRef<HTMLVideoElement | null>(null);
+  const lastTimeUpdateAtRef = useRef(0);
+  const loudnessGainRef = useRef(1);
+  const masterVolume = () => {
+    const v = Math.max(0, Math.min(1, usePlaybackStore.getState().volume));
+    return Math.min(1, v ** 3 * loudnessGainRef.current);
+  };
+  const emptyElement = (e: HTMLVideoElement) => {
+    e.pause();
+    e.removeAttribute("src");
+    e.load();
+  };
+  /** Drop the preloaded next track. */
+  const resetIdle = () => {
+    prepRef.current = null;
+    const idle = idleRef.current;
+    if (
+      !idle ||
+      idle === fadeRef.current?.tail ||
+      idle === releasingRef.current
+    )
+      return;
+    if (idle.getAttribute("src")) emptyElement(idle);
+  };
+  /** A skip mid-fade: silence the outgoing element over SKIP_RAMP_MS rather
+   *  than pausing it at volume, which clicks. */
+  const cutTail = () => {
+    const f = fadeRef.current;
+    if (!f) return;
+    fadeRef.current = null;
+    const tail = f.tail;
+    releasingRef.current = tail;
+    const from = tail.volume;
+    const t0 = performance.now();
+    const step = () => {
+      const k = Math.min(1, (performance.now() - t0) / SKIP_RAMP_MS);
+      tail.volume = from * (1 - k);
+      if (k < 1) {
+        window.setTimeout(step, 15);
+        return;
+      }
+      emptyElement(tail);
+      if (releasingRef.current === tail) releasingRef.current = null;
+    };
+    step();
+    // The incoming element was partway up; whatever plays now is at full.
+    const el = audioRef.current;
+    if (el) el.volume = masterVolume();
+    appLog("[crossfade] cut by a skip");
+  };
+  /** Start a freshly loaded master, recovering from WebKit aborting the
+   *  play() while the track is still current. */
+  const playOrRecover = (el: HTMLVideoElement, token: number) => {
+    void playLocal(el).catch((e) => {
+      // AbortError from a NEW load (user skipped mid-start) is
+      // harmless: the token is stale and the next resolve owns
+      // playback. But WebKit also aborts a pending play() when
+      // the page goes hidden before playback starts, leaving the
+      // element paused with the store still wanting playback —
+      // proven in the log 2026-08-31 14:18:36: play() rejected
+      // AbortError on the visibility flip, canplay two seconds
+      // later, silence (the desktop-switch stall). The token
+      // still being current tells those cases apart. Starting
+      // while hidden is allowed (queue auto-advance does it), so
+      // retry once the element can play.
+      if (e?.name === "AbortError") {
+        if (token !== resolveTokenRef.current) return;
+        if (!usePlaybackStore.getState().playing) return;
+        appLog(
+          "play() aborted with track still current; retrying at canplay",
+        );
+        const retry = () => {
+          if (token !== resolveTokenRef.current) return;
+          if (!usePlaybackStore.getState().playing) return;
+          void playLocal(el).catch(() => {});
+        };
+        if (el.readyState >= 3) retry();
+        else el.addEventListener("canplay", retry, { once: true });
+        return;
+      }
+      if (import.meta.env.DEV) {
+        console.error("[audio] play() rejected:", e);
+      }
+      usePlaybackStore
+        .getState()
+        .setStatus("error", e?.message ?? String(e));
+    });
+  };
   // Counts how many tracks have failed in a row without a successful
   // play in between. Reset to 0 on `playing`. Used to short-circuit
   // auto-skip after a few consecutive failures so we don't burn through
@@ -385,31 +534,62 @@ export function useAudioEngine() {
   // surface (getMediaElement above).
   useEffect(() => {
     if (audioRef.current) return;
-    const el = document.createElement("video");
-    el.preload = "auto";
-    el.playsInline = true;
-    // Note: do NOT set crossOrigin — googlevideo.com doesn't return CORS
-    // headers, and setting it makes the media fail to load in the webview.
+    const make = () => {
+      const el = document.createElement("video");
+      el.preload = "auto";
+      el.playsInline = true;
+      // Note: do NOT set crossOrigin — googlevideo.com doesn't return CORS
+      // headers, and setting it makes the media fail to load in the webview.
+      return el;
+    };
+    const el = make();
     audioRef.current = el;
     mediaElSingleton = el;
+    // The second element, for crossfade and gapless: it loads the next
+    // track while this one plays, then the two swap roles (see adopt in
+    // the resolve effect). Unused while both settings are off.
+    idleRef.current = make();
     return () => {
-      el.pause();
-      el.src = "";
-      el.remove();
+      for (const e of [audioRef.current, idleRef.current]) {
+        if (!e) continue;
+        e.pause();
+        e.src = "";
+        e.remove();
+      }
       audioRef.current = null;
+      idleRef.current = null;
       mediaElSingleton = null;
     };
   }, []);
 
-  // Wire element → store events.
+  // Wire element → store events. Both elements are wired, and a handler
+  // only acts while its element is the master: the idle one loads the next
+  // track silently, and after a handoff the outgoing one plays out a fade.
   useEffect(() => {
-    const el = audioRef.current;
-    if (!el) return;
+    const unbind = [audioRef.current, idleRef.current].map((el) =>
+      el ? bindElement(el) : () => {},
+    );
+    return () => unbind.forEach((u) => u());
+  }, []);
+  const bindElement = (el: HTMLVideoElement) => {
     const store = usePlaybackStore.getState;
+    const offs: (() => void)[] = [];
+    const on = (
+      target: EventTarget,
+      type: string,
+      fn: (ev: Event) => void,
+    ) => {
+      const guarded = (ev: Event) => {
+        if (audioRef.current === el) fn(ev);
+      };
+      target.addEventListener(type, guarded);
+      offs.push(() => target.removeEventListener(type, guarded));
+    };
 
     const trackEnd = trackEndLatch(advanceAfterTrack);
     const onEnded = trackEnd.onEnded;
     const onTimeUpdate = () => {
+      lastTimeUpdateAtRef.current = performance.now();
       store().setPosition(el.currentTime);
       // End-guard for the double-length m4a header bug: correctedDuration
       // shows the LISTED length while the element claims ~2x (phantom
@@ -623,42 +803,28 @@ export function useAudioEngine() {
 
     const onFlipPlay = () => noteFlip("play");
     const onFlipPause = () => noteFlip("pause");
-    el.addEventListener("play", onFlipPlay);
-    el.addEventListener("pause", onFlipPause);
-    el.addEventListener("timeupdate", onTimeUpdate);
-    el.addEventListener("durationchange", onDurationChange);
-    el.addEventListener("progress", onProgress);
-    el.addEventListener("ended", onEnded);
-    el.addEventListener("pause", onElPause);
-    el.addEventListener("play", onElPlay);
-    el.addEventListener("error", onError);
-    el.addEventListener("playing", onPlaying);
-    el.addEventListener("waiting", onWaiting);
-    for (const t of LOGGED) el.addEventListener(t, onLogged);
-    el.addEventListener("pause", onKeepAwake);
+    on(el, "play", onFlipPlay);
+    on(el, "pause", onFlipPause);
+    on(el, "timeupdate", onTimeUpdate);
+    on(el, "durationchange", onDurationChange);
+    on(el, "progress", onProgress);
+    on(el, "ended", onEnded);
+    on(el, "pause", onElPause);
+    on(el, "play", onElPlay);
+    on(el, "error", onError);
+    on(el, "playing", onPlaying);
+    on(el, "waiting", onWaiting);
+    for (const t of LOGGED) on(el, t, onLogged);
+    on(el, "pause", onKeepAwake);
     // A track resolved after the pause loads into an element that stays
     // paused, so no pause event: catch it when the metadata lands.
-    el.addEventListener("loadedmetadata", onKeepAwake);
-    document.addEventListener("visibilitychange", onVisibility);
+    on(el, "loadedmetadata", onKeepAwake);
+    on(document, "visibilitychange", onVisibility);
     return () => {
-      el.removeEventListener("play", onFlipPlay);
-      el.removeEventListener("pause", onFlipPause);
-      el.removeEventListener("timeupdate", onTimeUpdate);
-      el.removeEventListener("durationchange", onDurationChange);
-      el.removeEventListener("progress", onProgress);
-      el.removeEventListener("ended", onEnded);
-      el.removeEventListener("pause", onElPause);
-      el.removeEventListener("play", onElPlay);
-      el.removeEventListener("error", onError);
-      el.removeEventListener("playing", onPlaying);
-      el.removeEventListener("waiting", onWaiting);
-      for (const t of LOGGED) el.removeEventListener(t, onLogged);
-      el.removeEventListener("pause", onKeepAwake);
-      el.removeEventListener("loadedmetadata", onKeepAwake);
+      offs.forEach((off) => off());
       window.clearTimeout(awakeRetry);
-      document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, []);
+  };
 
   // React to current-track changes → resolve stream → set src.
   const { videoId, track, index, loaded } = usePlaybackStore(
@@ -904,6 +1070,80 @@ export function useAudioEngine() {
           : resume && resume.videoId === videoId
             ? { token, seconds: resume.seconds }
             : null;
+    // Crossfade or gapless handoff: the idle element already holds this
+    // track, loaded. Swap the two instead of loading; the outgoing one plays
+    // out its fade (or stops, for gapless). Any other run is a skip or a
+    // reload, which cuts a fade in progress.
+    const handoff = handoffRef.current;
+    handoffRef.current = null;
+    const idle = idleRef.current;
+    if (
+      handoff &&
+      idle &&
+      !sameSlot &&
+      handoff.slot !== slot &&
+      handoff.streamId === streamVideoId &&
+      premiumOk &&
+      !wantVideo &&
+      !isCasting() &&
+      prepRef.current?.ready &&
+      idle.src === handoff.src
+    ) {
+      const out = el;
+      audioRef.current = idle;
+      mediaElSingleton = idle;
+      idleRef.current = out;
+      prepRef.current = null;
+      loadedSlotRef.current = { videoId, slot };
+      carrySeekRef.current = null;
+      if (videoHoldRef.current) {
+        window.clearTimeout(videoHoldRef.current.timer);
+        videoHoldRef.current = null;
+      }
+      const st = usePlaybackStore.getState();
+      st.setStreamKind("audio");
+      st.setVideoStartup("idle");
+      st.setStreamUrl(handoff.src);
+      st.setStatus("loading");
+      void saveTrackMeta(streamVideoId, st.queue[st.index]);
+      // It reported its length while idle, when nothing listened.
+      idle.dispatchEvent(new Event("durationchange"));
+      idle.muted = st.muted;
+      // The fade was measured a tick or more ago; fade over what's left.
+      const fade = Math.min(handoff.fade, handoff.end - out.currentTime);
+      if (fade >= MIN_FADE_S) {
+        fadeRef.current = {
+          tail: out,
+          from: out.currentTime,
+          length: fade,
+          end: handoff.end,
+          gainOut: handoff.gainOut,
+          keep: streamVideoId,
+          lastT: out.currentTime,
+          movedAt: performance.now(),
+        };
+        idle.volume = 0;
+      } else {
+        emptyElement(out);
+        evictDegraded(streamVideoId);
+        idle.volume = masterVolume();
+        const lastUpdate = lastTimeUpdateAtRef.current;
+        idle.addEventListener(
+          "playing",
+          () =>
+            appLog(
+              `[gapless] gap ${Math.round(performance.now() - lastUpdate)}ms from the last timeupdate to playing`,
+            ),
+          { once: true },
+        );
+      }
+      appLog(
+        `[crossfade] handoff to ${streamVideoId} (${fade >= MIN_FADE_S ? `${fade.toFixed(1)}s fade` : "gapless"})`,
+      );
+      if (st.playing) playOrRecover(idle, token);
+      return;
+    }
+    cutTail();
     // Stop the previous track immediately. Without this the old src keeps
     // playing through the streamUrlFor() round-trip (~50–500 ms), so the
     // user hears the tail of track A bleed into the start of track B.
@@ -1060,13 +1300,7 @@ export function useAudioEngine() {
         // `keep` is the STREAM id, not the queue id: a song playing from
         // its video counterpart (or the reverse) streams under a different
         // id, and sparing the queue id would delete the file being read.
-        void getStreamBaseUrl()
-          .then((base) =>
-            fetch(
-              `${base}/degraded/evict?keep=${encodeURIComponent(streamVideoId ?? videoId ?? "")}`,
-            ),
-          )
-          .catch(() => {});
+        evictDegraded(streamVideoId ?? videoId ?? "");
         const hold = videoHoldRef.current;
         if (hold && hold.token === token) {
           el.addEventListener(
@@ -1082,42 +1316,7 @@ export function useAudioEngine() {
           );
           return;
         }
-        if (usePlaybackStore.getState().playing) {
-          void playLocal(el).catch((e) => {
-            // AbortError from a NEW load (user skipped mid-start) is
-            // harmless: the token is stale and the next resolve owns
-            // playback. But WebKit also aborts a pending play() when
-            // the page goes hidden before playback starts, leaving the
-            // element paused with the store still wanting playback —
-            // proven in the log 2026-08-31 14:18:36: play() rejected
-            // AbortError on the visibility flip, canplay two seconds
-            // later, silence (the desktop-switch stall). The token
-            // still being current tells those cases apart. Starting
-            // while hidden is allowed (queue auto-advance does it), so
-            // retry once the element can play.
-            if (e?.name === "AbortError") {
-              if (token !== resolveTokenRef.current) return;
-              if (!usePlaybackStore.getState().playing) return;
-              appLog(
-                "play() aborted with track still current; retrying at canplay",
-              );
-              const retry = () => {
-                if (token !== resolveTokenRef.current) return;
-                if (!usePlaybackStore.getState().playing) return;
-                void playLocal(el).catch(() => {});
-              };
-              if (el.readyState >= 3) retry();
-              else el.addEventListener("canplay", retry, { once: true });
-              return;
-            }
-            if (import.meta.env.DEV) {
-              console.error("[audio] play() rejected:", e);
-            }
-            usePlaybackStore
-              .getState()
-              .setStatus("error", e?.message ?? String(e));
-          });
-        }
+        if (usePlaybackStore.getState().playing) playOrRecover(el, token);
       })
       .catch((e: Error) => {
         if (token !== resolveTokenRef.current) return;
@@ -1136,6 +1335,8 @@ export function useAudioEngine() {
     // (sign-in, status re-check) re-resolves a track the gate parked.
     // `retryNonce` so the error handler can force a fresh stream-URL fetch
     // for the current track after a transient failure without changing id.
+    // cutTail only touches refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [streamVideoId, wantVideo, videoId, slot, premiumOk, retryNonce]);
 
   // Companion video: when the user picked the video version, stream the
@@ -1569,9 +1770,12 @@ export function useAudioEngine() {
   );
   const loudnessGain = useLoudnessGain(streamVideoId, nextStreamId);
   const muted = usePlaybackStore((s) => s.muted);
+  loudnessGainRef.current = loudnessGain;
   useEffect(() => {
     const el = audioRef.current;
     if (!el) return;
+    // Mid-fade the crossfade tick sets both elements every few ms.
+    if (fadeRef.current) return;
     // <audio>.volume is linear amplitude (0..1), but loudness perception
     // is logarithmic — a linear slider crams almost all the perceivable
     // change into the bottom ~20% and 20–100% sounds nearly identical.
@@ -1587,6 +1791,218 @@ export function useAudioEngine() {
       `[loudness] gain ${loudnessGain.toFixed(3)} el.volume ${el.volume.toFixed(4)}`,
     );
   }, [loudnessGain]);
+
+  // Crossfade and gapless. A timer, not timeupdate (4 a second is too coarse
+  // for a volume ramp), and not requestAnimationFrame (stopped while the
+  // window is hidden). The fade's progress is read off the outgoing
+  // element's own clock, so a pause freezes it and a resume picks it up.
+  const crossfadeSeconds = useSettingsStore((s) => s.crossfadeSeconds);
+  const gapless = useSettingsStore((s) => s.gapless);
+  const handoffOn = crossfadeSeconds > 0 || gapless;
+  useEffect(() => {
+    if (!handoffOn) return;
+    const prepare = (slotId: number, streamId: string) => {
+      const gen = ++prepGenRef.current;
+      prepRef.current = { gen, slot: slotId, streamId, ready: false };
+      const giveUp = (why: string) => {
+        if (prepRef.current?.gen !== gen) return;
+        appLog(`[crossfade] ${streamId} ${why}; asking again in 5s`);
+        prepRef.current = null;
+        prepRetryAtRef.current = performance.now() + 5000;
+      };
+      void (async () => {
+        // Only a finished file: one still downloading could stall mid-fade.
+        const cached = await invoke<{ videoId: string }[]>("list_cache").then(
+          (list) => list.some((e) => e.videoId === streamId),
+          () => false,
+        );
+        if (prepRef.current?.gen !== gen) return;
+        if (!cached) return giveUp("not on disk yet");
+        const src = await streamUrlFor(streamId).catch(() => undefined);
+        if (prepRef.current?.gen !== gen) return;
+        const idle = idleRef.current;
+        if (!src || !idle) return giveUp("no stream URL");
+        idle.volume = 0;
+        idle.src = src;
+        idle.load();
+        prepRef.current = { ...prepRef.current, src: idle.src };
+        idle.addEventListener(
+          "canplaythrough",
+          () => {
+            const p = prepRef.current;
+            if (p?.gen !== gen) return;
+            prepRef.current = { ...p, ready: true };
+            appLog(`[crossfade] ${streamId} ready in the idle element`);
+          },
+          { once: true },
+        );
+      })();
+    };
+
+    const tick = () => {
+      const el = audioRef.current;
+      const idle = idleRef.current;
+      if (!el || !idle) return;
+      const s = usePlaybackStore.getState();
+
+      const f = fadeRef.current;
+      if (f) {
+        const tail = f.tail;
+        if (isCasting()) return cutTail();
+        const g = fadeGains((tail.currentTime - f.from) / f.length);
+        // The fade runs on the outgoing clock, so a stalled or failed
+        // outgoing stream would leave the incoming one quiet: give up on it.
+        const now = performance.now();
+        if (tail.currentTime !== f.lastT || !s.playing || tail.paused) {
+          f.lastT = tail.currentTime;
+          f.movedAt = now;
+        }
+        const stuck = !!tail.error || now - f.movedAt > 1500;
+        if (g.in >= 1 || tail.ended || tail.currentTime >= f.end || stuck) {
+          fadeRef.current = null;
+          emptyElement(tail);
+          evictDegraded(f.keep);
+          el.muted = s.muted;
+          el.volume = masterVolume();
+          appLog("[crossfade] done");
+          return;
+        }
+        if (!s.playing) {
+          if (!tail.paused) tail.pause();
+        } else if (tail.paused && !el.paused) {
+          void playLocal(tail).catch(() => {});
+        }
+        // The slider is read every tick, so moving it mid-fade works.
+        const v = Math.max(0, Math.min(1, s.volume)) ** 3;
+        tail.muted = s.muted;
+        el.muted = s.muted;
+        tail.volume = Math.min(1, v * f.gainOut * g.out);
+        el.volume = Math.min(1, v * loudnessGainRef.current * g.in);
+        return;
+      }
+
+      const cur = s.index >= 0 ? s.queue[s.index] : undefined;
+      // What next() will play. A shuffled repeat-all wrap reshuffles, so its
+      // first track isn't known until then.
+      const next =
+        s.queue[s.index + 1] ??
+        (s.repeat === "all" && !s.shuffle && s.queue.length > 1
+          ? s.queue[0]
+          : undefined);
+      const ts = useTrackSourceStore.getState();
+      const why = handoffBlocked({
+        hasNext: !!cur && !!next,
+        repeatOne:
+          s.repeat === "one" || (s.repeat === "all" && s.queue.length === 1),
+        casting: isCasting(),
+        video:
+          !!cur &&
+          !!next &&
+          (wantsVideoStream(cur.videoId, ts.byVideoId, ts.preferVideo) ||
+            wantsVideoStream(next.videoId, ts.byVideoId, ts.preferVideo)),
+        sleepAfterTrack: useSleepTimer.getState().afterTrack,
+      });
+      const slotId = slotRef.current.id;
+      if (
+        why ||
+        !cur ||
+        !next ||
+        usePremiumStore.getState().status !== "premium" ||
+        loadedSlotRef.current?.slot !== slotId
+      ) {
+        handoffRef.current = null;
+        if (prepRef.current) resetIdle();
+        return;
+      }
+      const streamId = resolveStreamId(
+        next.videoId,
+        ts.byVideoId,
+        ts.preferVideo,
+      );
+      let p = prepRef.current;
+      if (p && (p.slot !== slotId || p.streamId !== streamId)) {
+        handoffRef.current = null;
+        resetIdle();
+        p = null;
+      }
+      const h = handoffRef.current;
+      if (h && (h.slot !== slotId || h.streamId !== streamId)) {
+        handoffRef.current = null;
+      }
+      if (!s.playing || el.paused) return;
+
+      const end = effectiveEnd({
+        elementDuration: rawElDurationRef.current || el.duration,
+        duration: s.duration,
+        metaDuration: metaReferenceRef.current ?? 0,
+        lastVocal: lastVocalRef.current,
+        outroAllowed:
+          outroSuppressedRef.current !== cur.videoId &&
+          outroSkippedRef.current !== cur.videoId,
+      });
+      if (end === null) return;
+      const settings = useSettingsStore.getState();
+      const pos = el.currentTime;
+      if (!p) {
+        if (
+          pos >= end - settings.crossfadeSeconds - PREP_LEAD_S &&
+          performance.now() >= prepRetryAtRef.current &&
+          idle !== releasingRef.current
+        ) {
+          prepare(slotId, streamId);
+        }
+        return;
+      }
+      if (!p.ready || !p.src) return;
+
+      if (handoffRef.current) {
+        // Gapless armed: the end latch advances, or the head start does.
+        if (pos >= end - GAPLESS_HEAD_START_MS / 1000 && GAPLESS_HEAD_START_MS)
+          advanceAfterTrack();
+        return;
+      }
+      // The rows' own lengths too: correctedDuration leaves a doubled
+      // header under 30 s alone, and the 10 s floor must still hold.
+      const curLen = Math.min(end, cur.duration || Infinity);
+      const nextLen = Math.min(
+        correctedDuration(next.duration, idle.duration),
+        next.duration || Infinity,
+      );
+      const length = fadeLength(settings.crossfadeSeconds, curLen, nextLen);
+      const fade = fadeNow(pos, end, length);
+      if (fade !== null) {
+        handoffRef.current = {
+          slot: slotId,
+          streamId,
+          src: p.src,
+          fade,
+          end,
+          gainOut: loudnessGainRef.current,
+        };
+        advanceAfterTrack();
+      } else if (settings.gapless && (length === 0 || pos >= end - length)) {
+        // Gapless, or too late in the fade window to fade: start from the
+        // end latch.
+        handoffRef.current = {
+          slot: slotId,
+          streamId,
+          src: p.src,
+          fade: 0,
+          end,
+          gainOut: loudnessGainRef.current,
+        };
+      }
+    };
+    const timer = window.setInterval(tick, 25);
+    return () => {
+      window.clearInterval(timer);
+      handoffRef.current = null;
+      cutTail();
+      resetIdle();
+    };
+    // The helpers only touch refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handoffOn]);
 
   // Handle seek requests.
   const pendingSeek = usePlaybackStore((s) => s.pendingSeek);
