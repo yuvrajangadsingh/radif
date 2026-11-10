@@ -196,6 +196,39 @@ pub fn inspect_jar(jar: &str, host: &str, path: &str, now: i64) -> Credentials {
     out
 }
 
+/// For the log when the jar can't sign: each signing cookie by name, and
+/// what's wrong with it for this host and path (absent, empty, expired,
+/// another host or path). Never a value.
+pub fn signing_report(jar: &str, host: &str, path: &str, now: i64) -> String {
+    SIGNING_COOKIES
+        .iter()
+        .map(|name| {
+            // Best copy wins, whatever the jar order: one that applies to
+            // this host and path says more than one scoped elsewhere.
+            const RANK: [&str; 6] = ["absent", "another host", "another path", "empty", "expired", "usable"];
+            let state = parse_jar(jar)
+                .filter(|c| c.name == *name)
+                .map(|c| {
+                    if !c.matches_host(host) {
+                        "another host"
+                    } else if !c.matches_path(path) {
+                        "another path"
+                    } else if c.value.is_empty() {
+                        "empty"
+                    } else if c.is_expired(now) {
+                        "expired"
+                    } else {
+                        "usable"
+                    }
+                })
+                .max_by_key(|s| RANK.iter().position(|r| r == s))
+                .unwrap_or("absent");
+            format!("{name} {state}")
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// Did anything about the cookie set change?
 ///
 /// Evidence that a keeper reload actually reached Google, which nothing
@@ -254,6 +287,10 @@ pub struct AuthStatus {
     pub state: &'static str,
     /// Short, value-free explanation for the log and for debugging.
     pub reason: String,
+    /// The account whose jar this answer is about, for the log. Not sent to
+    /// the UI.
+    #[serde(skip)]
+    pub account: Option<String>,
 }
 
 impl AuthStatus {
@@ -261,6 +298,7 @@ impl AuthStatus {
         Self {
             state: STATE_USABLE,
             reason: String::new(),
+            account: None,
         }
     }
 
@@ -268,6 +306,7 @@ impl AuthStatus {
         Self {
             state: STATE_UNKNOWN,
             reason: reason.into(),
+            account: None,
         }
     }
 
@@ -275,6 +314,7 @@ impl AuthStatus {
         Self {
             state: STATE_SIGNED_OUT,
             reason: reason.into(),
+            account: None,
         }
     }
 
@@ -626,6 +666,36 @@ mod tests {
             "sign-me",
         ));
         jar
+    }
+
+    #[test]
+    fn the_signing_report_names_what_is_wrong() {
+        let mut jar = String::from("# Netscape HTTP Cookie File\n");
+        jar.push_str(&line(".youtube.com", "/", NOW - 1, "__Secure-3PAPISID", "old"));
+        jar.push_str(&line(".google.com", "/", 1_800_000_000, "SAPISID", "elsewhere"));
+        assert_eq!(
+            signing_report(&jar, HOST, PATH, NOW),
+            "__Secure-3PAPISID expired, SAPISID another host"
+        );
+        assert_eq!(
+            signing_report("# Netscape HTTP Cookie File\n", HOST, PATH, NOW),
+            "__Secure-3PAPISID absent, SAPISID absent"
+        );
+        assert_eq!(
+            signing_report(&signed_in_jar(), HOST, PATH, NOW),
+            "__Secure-3PAPISID usable, SAPISID absent"
+        );
+        // Jar order doesn't change the answer: the applicable expired copy
+        // beats one scoped to another host, either way round.
+        let mut a = String::from("# Netscape HTTP Cookie File\n");
+        a.push_str(&line(".google.com", "/", 1_800_000_000, "SAPISID", "g"));
+        a.push_str(&line(".youtube.com", "/", NOW - 1, "SAPISID", "y"));
+        let mut b = String::from("# Netscape HTTP Cookie File\n");
+        b.push_str(&line(".youtube.com", "/", NOW - 1, "SAPISID", "y"));
+        b.push_str(&line(".google.com", "/", 1_800_000_000, "SAPISID", "g"));
+        for jar in [a, b] {
+            assert!(signing_report(&jar, HOST, PATH, NOW).ends_with("SAPISID expired"));
+        }
     }
 
     #[test]
