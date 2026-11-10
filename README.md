@@ -102,7 +102,7 @@ when it launches, at most once every three days.
 
 </details>
 
-Radif needs macOS 10.15 or later. It hasn't been tested on macOS 15 or older.
+Radif needs macOS 10.15 or later. It has only been tested on macOS 27.
 
 ## What happens when you sign in
 
