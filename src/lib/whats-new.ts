@@ -80,6 +80,11 @@ export const WHATS_NEW: WhatsNewEntry[] = [
         text: "Better spellings for Punjabi endings (kaaliyan), Hindi words like hoon and karoon, a lone aa, and Tamil plurals, doubled letters and common loanwords.",
       },
       {
+        type: "improved",
+        title: "YouTube red",
+        text: "Radif's red now matches YouTube's.",
+      },
+      {
         type: "fixed",
         title: "Playback",
         text: "Start radio on a paused song keeps its place. Clicking a song that failed, or pressing Play on it, tries it again. After several failed songs the clock no longer shows the previous song's length. Pressing Play after the queue ends starts the last song over, and switching between a song and its video no longer skips it early.",
