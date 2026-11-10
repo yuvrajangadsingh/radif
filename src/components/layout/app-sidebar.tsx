@@ -608,7 +608,14 @@ function FolderItem({
             const composing =
               e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229;
             if (e.key === "Enter" && !composing) e.currentTarget.blur();
-            else if (e.key === "Escape") done(folder.name);
+            else if (e.key === "Escape") {
+              // Handled here: unhandled, macOS takes Escape out of
+              // fullscreen (QA r17 N1), and the fullscreen player's
+              // window listener would close it.
+              e.preventDefault();
+              e.stopPropagation();
+              done(folder.name);
+            }
           }}
         />
       </SidebarMenuItem>
