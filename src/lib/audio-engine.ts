@@ -11,7 +11,17 @@ import {
   streamUrlFor,
 } from "@/lib/stream";
 import { useLoudnessGain } from "@/lib/loudness";
-import { advanceAfterTrack } from "@/lib/sleep-timer";
+import { advanceAfterTrack, useSleepTimer } from "@/lib/sleep-timer";
+import {
+  effectiveEnd,
+  fadeGains,
+  fadeLength,
+  fadeNow,
+  GAPLESS_HEAD_START_MS,
+  handoffBlocked,
+  PREP_LEAD_S,
+  SKIP_RAMP_MS,
+} from "@/lib/crossfade";
 import { followSlot, type PlayingSlot } from "@/lib/playing-slot";
 import { usePlaybackStore, type QueueTrack } from "@/lib/store/playback";
 import { videoQualityTier } from "@/lib/video-quality-tier";
@@ -259,6 +269,86 @@ export function useAudioEngine() {
   const loadedSlotRef = useRef<{ videoId?: string; slot: number } | null>(
     null,
   );
+  // Crossfade and gapless (lib/crossfade.ts). prep: the next track loading
+  // into the idle element. handoff: set just before the store advances and
+  // taken by the resolve effect, which swaps the elements instead of
+  // loading (adopt). fade: the outgoing element playing out its fade.
+  const prepRef = useRef<{
+    gen: number;
+    slot: number;
+    streamId: string;
+    src?: string;
+    ready: boolean;
+  } | null>(null);
+  const prepGenRef = useRef(0);
+  const prepRetryAtRef = useRef(0);
+  const handoffRef = useRef<{
+    slot: number;
+    streamId: string;
+    src: string;
+    /** Fade seconds; 0 is a gapless start. */
+    fade: number;
+    end: number;
+    gainOut: number;
+  } | null>(null);
+  const fadeRef = useRef<{
+    tail: HTMLVideoElement;
+    from: number;
+    length: number;
+    end: number;
+    gainOut: number;
+  } | null>(null);
+  // An element ramping to silence after a skip mid-fade; not reusable yet.
+  const releasingRef = useRef<HTMLVideoElement | null>(null);
+  const lastTimeUpdateAtRef = useRef(0);
+  const loudnessGainRef = useRef(1);
+  const masterVolume = () => {
+    const v = Math.max(0, Math.min(1, usePlaybackStore.getState().volume));
+    return Math.min(1, v ** 3 * loudnessGainRef.current);
+  };
+  const emptyElement = (e: HTMLVideoElement) => {
+    e.pause();
+    e.removeAttribute("src");
+    e.load();
+  };
+  /** Drop the preloaded next track. */
+  const resetIdle = () => {
+    prepRef.current = null;
+    const idle = idleRef.current;
+    if (
+      !idle ||
+      idle === fadeRef.current?.tail ||
+      idle === releasingRef.current
+    )
+      return;
+    if (idle.getAttribute("src")) emptyElement(idle);
+  };
+  /** A skip mid-fade: silence the outgoing element over SKIP_RAMP_MS rather
+   *  than pausing it at volume, which clicks. */
+  const cutTail = () => {
+    const f = fadeRef.current;
+    if (!f) return;
+    fadeRef.current = null;
+    const tail = f.tail;
+    releasingRef.current = tail;
+    const from = tail.volume;
+    const t0 = performance.now();
+    const step = () => {
+      const k = Math.min(1, (performance.now() - t0) / SKIP_RAMP_MS);
+      tail.volume = from * (1 - k);
+      if (k < 1) {
+        window.setTimeout(step, 15);
+        return;
+      }
+      emptyElement(tail);
+      if (releasingRef.current === tail) releasingRef.current = null;
+    };
+    step();
+    // The incoming element was partway up; whatever plays now is at full.
+    const el = audioRef.current;
+    if (el) el.volume = masterVolume();
+    appLog("[crossfade] cut by a skip");
+  };
   // Counts how many tracks have failed in a row without a successful
   // play in between. Reset to 0 on `playing`. Used to short-circuit
   // auto-skip after a few consecutive failures so we don't burn through
@@ -443,6 +533,7 @@ export function useAudioEngine() {
     const trackEnd = trackEndLatch(advanceAfterTrack);
     const onEnded = trackEnd.onEnded;
     const onTimeUpdate = () => {
+      lastTimeUpdateAtRef.current = performance.now();
       store().setPosition(el.currentTime);
       // End-guard for the double-length m4a header bug: correctedDuration
       // shows the LISTED length while the element claims ~2x (phantom
@@ -923,6 +1014,73 @@ export function useAudioEngine() {
           : resume && resume.videoId === videoId
             ? { token, seconds: resume.seconds }
             : null;
+    // Crossfade or gapless handoff: the idle element already holds this
+    // track, loaded. Swap the two instead of loading; the outgoing one plays
+    // out its fade (or stops, for gapless). Any other run is a skip or a
+    // reload, which cuts a fade in progress.
+    const handoff = handoffRef.current;
+    handoffRef.current = null;
+    const idle = idleRef.current;
+    if (
+      handoff &&
+      idle &&
+      !sameSlot &&
+      handoff.slot !== slot &&
+      handoff.streamId === streamVideoId &&
+      premiumOk &&
+      !wantVideo &&
+      !isCasting() &&
+      prepRef.current?.ready &&
+      idle.src === handoff.src
+    ) {
+      const out = el;
+      audioRef.current = idle;
+      mediaElSingleton = idle;
+      idleRef.current = out;
+      prepRef.current = null;
+      loadedSlotRef.current = { videoId, slot };
+      carrySeekRef.current = null;
+      if (videoHoldRef.current) {
+        window.clearTimeout(videoHoldRef.current.timer);
+        videoHoldRef.current = null;
+      }
+      const st = usePlaybackStore.getState();
+      st.setStreamKind("audio");
+      st.setVideoStartup("idle");
+      st.setStreamUrl(handoff.src);
+      st.setStatus("loading");
+      void saveTrackMeta(streamVideoId, st.queue[st.index]);
+      // It reported its length while idle, when nothing listened.
+      idle.dispatchEvent(new Event("durationchange"));
+      if (handoff.fade > 0) {
+        fadeRef.current = {
+          tail: out,
+          from: out.currentTime,
+          length: handoff.fade,
+          end: handoff.end,
+          gainOut: handoff.gainOut,
+        };
+        idle.volume = 0;
+      } else {
+        emptyElement(out);
+        idle.volume = masterVolume();
+        const lastUpdate = lastTimeUpdateAtRef.current;
+        idle.addEventListener(
+          "playing",
+          () =>
+            appLog(
+              `[gapless] gap ${Math.round(performance.now() - lastUpdate)}ms from the last timeupdate to playing`,
+            ),
+          { once: true },
+        );
+      }
+      appLog(
+        `[crossfade] handoff to ${streamVideoId} (${handoff.fade > 0 ? `${handoff.fade.toFixed(1)}s fade` : "gapless"})`,
+      );
+      if (st.playing) void playLocal(idle).catch(() => {});
+      return;
+    }
+    cutTail();
     // Stop the previous track immediately. Without this the old src keeps
     // playing through the streamUrlFor() round-trip (~50–500 ms), so the
     // user hears the tail of track A bleed into the start of track B.
@@ -1155,6 +1313,8 @@ export function useAudioEngine() {
     // (sign-in, status re-check) re-resolves a track the gate parked.
     // `retryNonce` so the error handler can force a fresh stream-URL fetch
     // for the current track after a transient failure without changing id.
+    // cutTail only touches refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [streamVideoId, wantVideo, videoId, slot, premiumOk, retryNonce]);
 
   // Companion video: when the user picked the video version, stream the
@@ -1588,9 +1748,12 @@ export function useAudioEngine() {
   );
   const loudnessGain = useLoudnessGain(streamVideoId, nextStreamId);
   const muted = usePlaybackStore((s) => s.muted);
+  loudnessGainRef.current = loudnessGain;
   useEffect(() => {
     const el = audioRef.current;
     if (!el) return;
+    // Mid-fade the crossfade tick sets both elements every few ms.
+    if (fadeRef.current) return;
     // <audio>.volume is linear amplitude (0..1), but loudness perception
     // is logarithmic — a linear slider crams almost all the perceivable
     // change into the bottom ~20% and 20–100% sounds nearly identical.
@@ -1606,6 +1769,193 @@ export function useAudioEngine() {
       `[loudness] gain ${loudnessGain.toFixed(3)} el.volume ${el.volume.toFixed(4)}`,
     );
   }, [loudnessGain]);
+
+  // Crossfade and gapless. A timer, not timeupdate (4 a second is too coarse
+  // for a volume ramp), and not requestAnimationFrame (stopped while the
+  // window is hidden). The fade's progress is read off the outgoing
+  // element's own clock, so a pause freezes it and a resume picks it up.
+  const crossfadeSeconds = useSettingsStore((s) => s.crossfadeSeconds);
+  const gapless = useSettingsStore((s) => s.gapless);
+  const handoffOn = crossfadeSeconds > 0 || gapless;
+  useEffect(() => {
+    if (!handoffOn) return;
+    const prepare = (slotId: number, streamId: string) => {
+      const gen = ++prepGenRef.current;
+      prepRef.current = { gen, slot: slotId, streamId, ready: false };
+      const giveUp = (why: string) => {
+        if (prepRef.current?.gen !== gen) return;
+        appLog(`[crossfade] ${streamId} ${why}; asking again in 5s`);
+        prepRef.current = null;
+        prepRetryAtRef.current = performance.now() + 5000;
+      };
+      void (async () => {
+        // Only a finished file: one still downloading could stall mid-fade.
+        const cached = await invoke<{ videoId: string }[]>("list_cache").then(
+          (list) => list.some((e) => e.videoId === streamId),
+          () => false,
+        );
+        if (prepRef.current?.gen !== gen) return;
+        if (!cached) return giveUp("not on disk yet");
+        const src = await streamUrlFor(streamId).catch(() => undefined);
+        if (prepRef.current?.gen !== gen) return;
+        const idle = idleRef.current;
+        if (!src || !idle) return giveUp("no stream URL");
+        idle.volume = 0;
+        idle.src = src;
+        idle.load();
+        prepRef.current = { ...prepRef.current, src: idle.src };
+        idle.addEventListener(
+          "canplaythrough",
+          () => {
+            const p = prepRef.current;
+            if (p?.gen !== gen) return;
+            prepRef.current = { ...p, ready: true };
+            appLog(`[crossfade] ${streamId} ready in the idle element`);
+          },
+          { once: true },
+        );
+      })();
+    };
+
+    const tick = () => {
+      const el = audioRef.current;
+      const idle = idleRef.current;
+      if (!el || !idle) return;
+      const s = usePlaybackStore.getState();
+
+      const f = fadeRef.current;
+      if (f) {
+        const tail = f.tail;
+        if (isCasting()) return cutTail();
+        if (!s.playing) {
+          if (!tail.paused) tail.pause();
+        } else if (tail.paused && !el.paused) {
+          void playLocal(tail).catch(() => {});
+        }
+        const g = fadeGains((tail.currentTime - f.from) / f.length);
+        // The slider is read every tick, so moving it mid-fade works.
+        const v = Math.max(0, Math.min(1, s.volume)) ** 3;
+        tail.muted = s.muted;
+        el.muted = s.muted;
+        tail.volume = Math.min(1, v * f.gainOut * g.out);
+        el.volume = Math.min(1, v * loudnessGainRef.current * g.in);
+        if (g.in >= 1 || tail.ended || tail.currentTime >= f.end) {
+          fadeRef.current = null;
+          emptyElement(tail);
+          el.volume = masterVolume();
+          appLog("[crossfade] done");
+        }
+        return;
+      }
+
+      const cur = s.index >= 0 ? s.queue[s.index] : undefined;
+      const next = s.queue[s.index + 1];
+      const ts = useTrackSourceStore.getState();
+      const why = handoffBlocked({
+        hasNext: !!cur && !!next,
+        repeatOne:
+          s.repeat === "one" || (s.repeat === "all" && s.queue.length === 1),
+        casting: isCasting(),
+        video:
+          !!cur &&
+          !!next &&
+          (wantsVideoStream(cur.videoId, ts.byVideoId, ts.preferVideo) ||
+            wantsVideoStream(next.videoId, ts.byVideoId, ts.preferVideo)),
+        sleepAfterTrack: useSleepTimer.getState().afterTrack,
+      });
+      const slotId = slotRef.current.id;
+      if (
+        why ||
+        !cur ||
+        !next ||
+        usePremiumStore.getState().status !== "premium" ||
+        loadedSlotRef.current?.slot !== slotId
+      ) {
+        handoffRef.current = null;
+        if (prepRef.current) resetIdle();
+        return;
+      }
+      const streamId = resolveStreamId(
+        next.videoId,
+        ts.byVideoId,
+        ts.preferVideo,
+      );
+      let p = prepRef.current;
+      if (p && (p.slot !== slotId || p.streamId !== streamId)) {
+        handoffRef.current = null;
+        resetIdle();
+        p = null;
+      }
+      const h = handoffRef.current;
+      if (h && (h.slot !== slotId || h.streamId !== streamId)) {
+        handoffRef.current = null;
+      }
+      if (!s.playing || el.paused) return;
+
+      const end = effectiveEnd({
+        elementDuration: rawElDurationRef.current || el.duration,
+        duration: s.duration,
+        metaDuration: metaReferenceRef.current ?? 0,
+        lastVocal: lastVocalRef.current,
+        outroAllowed:
+          outroSuppressedRef.current !== cur.videoId &&
+          outroSkippedRef.current !== cur.videoId,
+      });
+      if (end === null) return;
+      const settings = useSettingsStore.getState();
+      const pos = el.currentTime;
+      if (!p) {
+        if (
+          pos >= end - settings.crossfadeSeconds - PREP_LEAD_S &&
+          performance.now() >= prepRetryAtRef.current &&
+          idle !== releasingRef.current
+        ) {
+          prepare(slotId, streamId);
+        }
+        return;
+      }
+      if (!p.ready || !p.src) return;
+
+      if (handoffRef.current) {
+        // Gapless armed: the end latch advances, or the head start does.
+        if (pos >= end - GAPLESS_HEAD_START_MS / 1000 && GAPLESS_HEAD_START_MS)
+          advanceAfterTrack();
+        return;
+      }
+      const nextLen = correctedDuration(next.duration, idle.duration);
+      const length = fadeLength(settings.crossfadeSeconds, end, nextLen);
+      const fade = fadeNow(pos, end, length);
+      if (fade !== null) {
+        handoffRef.current = {
+          slot: slotId,
+          streamId,
+          src: p.src,
+          fade,
+          end,
+          gainOut: loudnessGainRef.current,
+        };
+        advanceAfterTrack();
+      } else if (length === 0 && settings.gapless) {
+        handoffRef.current = {
+          slot: slotId,
+          streamId,
+          src: p.src,
+          fade: 0,
+          end,
+          gainOut: loudnessGainRef.current,
+        };
+      }
+    };
+    const timer = window.setInterval(tick, 25);
+    return () => {
+      window.clearInterval(timer);
+      handoffRef.current = null;
+      cutTail();
+      resetIdle();
+    };
+    // The helpers only touch refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handoffOn]);
 
   // Handle seek requests.
   const pendingSeek = usePlaybackStore((s) => s.pendingSeek);
