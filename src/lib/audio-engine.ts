@@ -236,7 +236,10 @@ function playLocal(el: HTMLMediaElement | null | undefined): Promise<void> {
 }
 
 export function useAudioEngine() {
+  // The master: the element everything reads and drives. It can swap with
+  // idleRef at a crossfade or gapless handoff, so read it at use time.
   const audioRef = useRef<HTMLVideoElement | null>(null);
+  const idleRef = useRef<HTMLVideoElement | null>(null);
   // Guard against stale stream resolutions when the user skips mid-fetch.
   const resolveTokenRef = useRef(0);
   // Position continuity across same-track reloads (song<->video source
@@ -385,27 +388,57 @@ export function useAudioEngine() {
   // surface (getMediaElement above).
   useEffect(() => {
     if (audioRef.current) return;
-    const el = document.createElement("video");
-    el.preload = "auto";
-    el.playsInline = true;
-    // Note: do NOT set crossOrigin — googlevideo.com doesn't return CORS
-    // headers, and setting it makes the media fail to load in the webview.
+    const make = () => {
+      const el = document.createElement("video");
+      el.preload = "auto";
+      el.playsInline = true;
+      // Note: do NOT set crossOrigin — googlevideo.com doesn't return CORS
+      // headers, and setting it makes the media fail to load in the webview.
+      return el;
+    };
+    const el = make();
     audioRef.current = el;
     mediaElSingleton = el;
+    // The second element, for crossfade and gapless: it loads the next
+    // track while this one plays, then the two swap roles (see adopt in
+    // the resolve effect). Unused while both settings are off.
+    idleRef.current = make();
     return () => {
-      el.pause();
-      el.src = "";
-      el.remove();
+      for (const e of [audioRef.current, idleRef.current]) {
+        if (!e) continue;
+        e.pause();
+        e.src = "";
+        e.remove();
+      }
       audioRef.current = null;
+      idleRef.current = null;
       mediaElSingleton = null;
     };
   }, []);
 
-  // Wire element → store events.
+  // Wire element → store events. Both elements are wired, and a handler
+  // only acts while its element is the master: the idle one loads the next
+  // track silently, and after a handoff the outgoing one plays out a fade.
   useEffect(() => {
-    const el = audioRef.current;
-    if (!el) return;
+    const unbind = [audioRef.current, idleRef.current].map((el) =>
+      el ? bindElement(el) : () => {},
+    );
+    return () => unbind.forEach((u) => u());
+  }, []);
+  const bindElement = (el: HTMLVideoElement) => {
     const store = usePlaybackStore.getState;
+    const offs: (() => void)[] = [];
+    const on = (
+      target: EventTarget,
+      type: string,
+      fn: (ev: Event) => void,
+    ) => {
+      const guarded = (ev: Event) => {
+        if (audioRef.current === el) fn(ev);
+      };
+      target.addEventListener(type, guarded);
+      offs.push(() => target.removeEventListener(type, guarded));
+    };
 
     const trackEnd = trackEndLatch(advanceAfterTrack);
     const onEnded = trackEnd.onEnded;
@@ -623,42 +656,28 @@ export function useAudioEngine() {
 
     const onFlipPlay = () => noteFlip("play");
     const onFlipPause = () => noteFlip("pause");
-    el.addEventListener("play", onFlipPlay);
-    el.addEventListener("pause", onFlipPause);
-    el.addEventListener("timeupdate", onTimeUpdate);
-    el.addEventListener("durationchange", onDurationChange);
-    el.addEventListener("progress", onProgress);
-    el.addEventListener("ended", onEnded);
-    el.addEventListener("pause", onElPause);
-    el.addEventListener("play", onElPlay);
-    el.addEventListener("error", onError);
-    el.addEventListener("playing", onPlaying);
-    el.addEventListener("waiting", onWaiting);
-    for (const t of LOGGED) el.addEventListener(t, onLogged);
-    el.addEventListener("pause", onKeepAwake);
+    on(el, "play", onFlipPlay);
+    on(el, "pause", onFlipPause);
+    on(el, "timeupdate", onTimeUpdate);
+    on(el, "durationchange", onDurationChange);
+    on(el, "progress", onProgress);
+    on(el, "ended", onEnded);
+    on(el, "pause", onElPause);
+    on(el, "play", onElPlay);
+    on(el, "error", onError);
+    on(el, "playing", onPlaying);
+    on(el, "waiting", onWaiting);
+    for (const t of LOGGED) on(el, t, onLogged);
+    on(el, "pause", onKeepAwake);
     // A track resolved after the pause loads into an element that stays
     // paused, so no pause event: catch it when the metadata lands.
-    el.addEventListener("loadedmetadata", onKeepAwake);
-    document.addEventListener("visibilitychange", onVisibility);
+    on(el, "loadedmetadata", onKeepAwake);
+    on(document, "visibilitychange", onVisibility);
     return () => {
-      el.removeEventListener("play", onFlipPlay);
-      el.removeEventListener("pause", onFlipPause);
-      el.removeEventListener("timeupdate", onTimeUpdate);
-      el.removeEventListener("durationchange", onDurationChange);
-      el.removeEventListener("progress", onProgress);
-      el.removeEventListener("ended", onEnded);
-      el.removeEventListener("pause", onElPause);
-      el.removeEventListener("play", onElPlay);
-      el.removeEventListener("error", onError);
-      el.removeEventListener("playing", onPlaying);
-      el.removeEventListener("waiting", onWaiting);
-      for (const t of LOGGED) el.removeEventListener(t, onLogged);
-      el.removeEventListener("pause", onKeepAwake);
-      el.removeEventListener("loadedmetadata", onKeepAwake);
+      offs.forEach((off) => off());
       window.clearTimeout(awakeRetry);
-      document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, []);
+  };
 
   // React to current-track changes → resolve stream → set src.
   const { videoId, track, index, loaded } = usePlaybackStore(
