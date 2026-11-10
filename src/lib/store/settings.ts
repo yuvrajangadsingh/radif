@@ -64,6 +64,9 @@ type State = {
    *  so the home feed and radio learn from plays here. On by default, the
    *  same as YouTube's own apps. See `lib/yt-history.ts`. */
   ytHistory: boolean;
+  /** The queue passes over songs you've disliked (`store/disliked.ts`).
+   *  On by default; a song you start yourself still plays. */
+  skipDisliked: boolean;
   /** Turn tracks louder than the target down, using YouTube's measurement of
    *  each one. Off by default: it changes how the app sounds. See
    *  `lib/loudness.ts`. */
@@ -90,6 +93,7 @@ type State = {
   setLastfmAvatar: (v: string | null) => void;
   setYtHistory: (v: boolean) => void;
   setNormalizeVolume: (v: boolean) => void;
+  setSkipDisliked: (v: boolean) => void;
   setRomanizeLyrics: (v: boolean) => void;
   /** Store the account returned by the connect flow and enable scrobbling. */
   setLastfmSession: (username: string, sessionKey: string) => void;
@@ -129,6 +133,7 @@ export const useSettingsStore = create<State>()(
       listenbrainzError: null,
       ytHistory: true,
       normalizeVolume: false,
+      skipDisliked: true,
       romanizeLyrics: false,
       crossfadeSeconds: 0,
       gapless: false,
@@ -147,6 +152,7 @@ export const useSettingsStore = create<State>()(
       setLastfmAvatar: (lastfmAvatar) => set({ lastfmAvatar }),
       setYtHistory: (ytHistory) => set({ ytHistory }),
       setNormalizeVolume: (normalizeVolume) => set({ normalizeVolume }),
+      setSkipDisliked: (skipDisliked) => set({ skipDisliked }),
       setRomanizeLyrics: (romanizeLyrics) => set({ romanizeLyrics }),
       setLastfmSession: (lastfmUsername, lastfmSessionKey) =>
         set({ lastfmUsername, lastfmSessionKey, lastfmEnabled: true }),

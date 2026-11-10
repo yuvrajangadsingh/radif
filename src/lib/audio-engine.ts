@@ -25,7 +25,15 @@ import {
   SKIP_RAMP_MS,
 } from "@/lib/crossfade";
 import { followSlot, type PlayingSlot } from "@/lib/playing-slot";
-import { usePlaybackStore, type QueueTrack } from "@/lib/store/playback";
+import {
+  playableAfter,
+  playableLeft,
+  usePlaybackStore,
+  type QueueTrack,
+} from "@/lib/store/playback";
+import { useDislikedStore } from "@/lib/store/disliked";
+import { useHiddenArtistsStore } from "@/lib/store/hidden-artists";
+import { usePinnedPlaylistsStore } from "@/lib/store/pinned-playlists";
 import { videoQualityTier } from "@/lib/video-quality-tier";
 import { isCasting, useCastStore } from "@/lib/store/cast";
 import { usePremiumStore } from "@/lib/store/premium";
@@ -2620,12 +2628,24 @@ export function useAudioEngine() {
   // exhausted YTM starts repeating tracks, which is the signal to stop.
   const queueContinuation = usePlaybackStore((s) => s.queueContinuation);
   const continuationFetchingRef = useRef(false);
+  // What the queue passes over (disliked with Skip disliked on, hidden
+  // artists): when these change, what's left to play does too, so the
+  // continuation and autoplay below check again.
+  const skipDislikedOn = useSettingsStore((s) => s.skipDisliked);
+  const dislikedIds = useDislikedStore((s) => s.ids);
+  const hiddenArtistsMap = useHiddenArtistsStore((s) => s.byAccount);
+  // Hidden artists are per account; the account lands after launch.
+  const passAccount = usePinnedPlaylistsStore((s) => s.activeAccountId);
+  // Bumped when a continuation fetch settles: a page of nothing but
+  // passed-over songs needs the drain to look again once its lock is off.
+  const [drainNonce, setDrainNonce] = useState(0);
   useEffect(() => {
     if (!queueContinuation) return;
     if (qIndex < 0 || qLen === 0) return;
-    // Only fetch once the playhead is close to the tail, so a freshly
-    // built 50-track queue doesn't immediately drain its whole source.
-    if (qLen - 1 - qIndex > 5) return;
+    // Only fetch once the playhead is close to the tail (counting songs
+    // that would play), so a freshly built 50-track queue doesn't
+    // immediately drain its whole source.
+    if (playableLeft(usePlaybackStore.getState().queue, qIndex) > 5) return;
     if (continuationFetchingRef.current) return;
     continuationFetchingRef.current = true;
     const token = queueContinuation;
@@ -2649,8 +2669,18 @@ export function useAudioEngine() {
       })
       .finally(() => {
         continuationFetchingRef.current = false;
+        setDrainNonce((n) => n + 1);
       });
-  }, [queueContinuation, qIndex, qLen]);
+  }, [
+    queueContinuation,
+    qIndex,
+    qLen,
+    skipDislikedOn,
+    dislikedIds,
+    hiddenArtistsMap,
+    passAccount,
+    drainNonce,
+  ]);
 
   const radioFetchedForRef = useRef<string | undefined>(undefined);
   useEffect(() => {
@@ -2659,18 +2689,25 @@ export function useAudioEngine() {
     // once it's exhausted (the drain effect clears it).
     if (queueContinuation) return;
     if (qIndex < 0 || !seedVideoId) return;
-    // Only fire when the current track is the last queued one.
-    if (qIndex < qLen - 1) return;
+    // Only fire when nothing after the current track would play: it's the
+    // last one, or the rest are passed over (disliked, hidden artist).
+    if (playableAfter(usePlaybackStore.getState().queue, qIndex)) return;
     if (radioFetchedForRef.current === seedVideoId) return;
     radioFetchedForRef.current = seedVideoId;
     fetchRadio(seedVideoId)
       .then((tracks) => {
         // Guard against a stale fetch: the user may have replaced the queue
         // (playNow/setQueue) while the radio request was in flight. Only
-        // append if this seed is still the current, last-in-queue track.
+        // append if this seed is still the current track with nothing
+        // playable after it.
         const s = usePlaybackStore.getState();
         const cur = s.index >= 0 ? s.queue[s.index]?.videoId : undefined;
-        if (cur !== seedVideoId || s.index < s.queue.length - 1) return;
+        if (cur !== seedVideoId || playableAfter(s.queue, s.index)) {
+          // Discarded: free the seed so a later check can fetch again.
+          if (radioFetchedForRef.current === seedVideoId)
+            radioFetchedForRef.current = undefined;
+          return;
+        }
         const rest = tracks.filter((t) => t.id !== seedVideoId);
         if (rest.length) s.appendToQueue(rest);
       })
@@ -2678,7 +2715,17 @@ export function useAudioEngine() {
         // Allow a retry on transient failure.
         radioFetchedForRef.current = undefined;
       });
-  }, [autoRadio, queueContinuation, qIndex, qLen, seedVideoId]);
+  }, [
+    autoRadio,
+    queueContinuation,
+    qIndex,
+    qLen,
+    seedVideoId,
+    skipDislikedOn,
+    dislikedIds,
+    hiddenArtistsMap,
+    passAccount,
+  ]);
 
   // Push metadata + playback state to the OS media controls. Native backends
   // interpolate the scrubber between pushes while the state is

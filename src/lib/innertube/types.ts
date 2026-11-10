@@ -7,6 +7,9 @@ export type Thumbnail = {
 export type MinimalArtist = {
   id?: string;
   name: string;
+  /** The id is the menu's "Go to artist" but `name` is the whole byline
+   *  (home cards with no linked artist), so the two may not match. */
+  bylineOnly?: true;
 };
 
 export type ShelfItemKind =
