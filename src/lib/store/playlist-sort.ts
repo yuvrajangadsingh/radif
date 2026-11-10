@@ -7,6 +7,7 @@ export type PlaylistSortMode =
   | "title-asc"
   | "title-desc"
   | "artist-asc"
+  | "album-asc"
   | "duration-asc"
   | "duration-desc";
 

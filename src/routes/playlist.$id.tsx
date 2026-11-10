@@ -586,6 +586,7 @@ const SORT_LABELS: Record<PlaylistSortMode, string> = {
   "title-asc": "Title (A–Z)",
   "title-desc": "Title (Z–A)",
   "artist-asc": "Artist (A–Z)",
+  "album-asc": "Album (A–Z)",
   "duration-asc": "Duration (shortest)",
   "duration-desc": "Duration (longest)",
 };
