@@ -68,6 +68,7 @@ import {
   usePinned,
   usePinnedPlaylistsStore,
 } from "@/lib/store/pinned-playlists";
+import { sidebarSections, type SidebarRow } from "@/lib/sidebar-rows";
 import { IS_BETA_PLATFORM } from "@/lib/platform";
 import { openChannelPicker } from "@/lib/store/channel-picker";
 import { openSettings } from "@/lib/store/settings-dialog";
@@ -203,13 +204,6 @@ export function AppSidebar() {
   );
 }
 
-type PlaylistRow = {
-  id: string;
-  title: string;
-  thumbnailUrl?: string;
-  pinned: boolean;
-};
-
 // Sidebar thumbnails render at 16px, so the largest source (last in the
 // list) is fine — the browser downscales it.
 function pickThumb(item: ShelfItem): string | undefined {
@@ -245,45 +239,21 @@ function SidebarPlaylists({
   const unpin = usePinnedPlaylistsStore((s) => s.unpin);
   const hide = usePinnedPlaylistsStore((s) => s.hide);
 
-  const rows = useMemo<PlaylistRow[]>(() => {
-    const hiddenIds = new Set(hidden);
-    // Liked Songs (`VLLM`) ships in the playlists shelf too; drop it —
-    // it's always rendered as the hard-coded first row below. Hidden
-    // playlists are dropped entirely (un-hidden from the Library).
-    const libItems = (library.data ?? [])
-      .flatMap((s) => s.items)
-      .filter((it) => it.id !== LIKED_ID && !hiddenIds.has(it.id));
-    const libById = new Map(libItems.map((it) => [it.id, it]));
-    const pinnedIds = new Set(pinned.map((p) => p.id));
-
-    // Pinned first, in stored order. Prefer fresh library data for
-    // title/thumbnail, but keep a pin visible even when it isn't in the
-    // current library fetch (e.g. pinned from search results). A hidden
-    // id can't be pinned (the store keeps them exclusive), but filter
-    // defensively so a stale pin can never leak a hidden playlist back in.
-    const pinnedRows: PlaylistRow[] = pinned
-      .filter((p) => p.id !== LIKED_ID && !hiddenIds.has(p.id))
-      .map((p) => {
-        const lib = libById.get(p.id);
-        return {
-          id: p.id,
-          title: lib?.title ?? p.title,
-          thumbnailUrl: lib ? pickThumb(lib) : p.thumbnailUrl,
-          pinned: true,
-        };
-      });
-
-    // Everything else, in library order.
-    const restRows: PlaylistRow[] = libItems
-      .filter((it) => !pinnedIds.has(it.id))
-      .map((it) => ({
-        id: it.id,
-        title: it.title,
-        thumbnailUrl: pickThumb(it),
-        pinned: false,
-      }));
-
-    return [...pinnedRows, ...restRows];
+  const rows = useMemo<SidebarRow[]>(() => {
+    const sections = sidebarSections({
+      library: (library.data ?? [])
+        .flatMap((s) => s.items)
+        .map((it) => ({
+          id: it.id,
+          title: it.title,
+          thumbnailUrl: pickThumb(it),
+        })),
+      pinned,
+      hidden,
+      folders: [],
+      likedId: LIKED_ID,
+    });
+    return [...sections.pinned, ...sections.rest];
   }, [library.data, pinned, hidden]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
