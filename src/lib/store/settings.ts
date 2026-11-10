@@ -71,6 +71,12 @@ type State = {
   /** Show a Latin spelling under Devanagari, Gurmukhi and Tamil lyric lines.
    *  See `lib/lyrics/romanize.ts`. */
   romanizeLyrics: boolean;
+  /** Seconds the end of one track overlaps the start of the next; 0 is off.
+   *  Hidden, no UI until QA passes it. See `lib/crossfade.ts`. */
+  crossfadeSeconds: number;
+  /** Start the next track the moment this one ends, from a preloaded
+   *  element. Hidden, no UI until QA passes it. */
+  gapless: boolean;
   setCloseAction: (v: CloseButtonAction) => void;
   setCacheAutoClean: (v: CacheAutoCleanPeriod) => void;
   markCacheCleaned: () => void;
@@ -124,6 +130,8 @@ export const useSettingsStore = create<State>()(
       ytHistory: true,
       normalizeVolume: false,
       romanizeLyrics: false,
+      crossfadeSeconds: 0,
+      gapless: false,
       setCloseAction: (closeAction) => set({ closeAction }),
       setCacheAutoClean: (cacheAutoClean) => set({ cacheAutoClean }),
       markCacheCleaned: () => set({ lastCacheCleanAt: Date.now() }),
