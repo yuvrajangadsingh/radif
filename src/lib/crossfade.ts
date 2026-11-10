@@ -16,11 +16,12 @@ export const PREP_LEAD_S = 20;
 
 /**
  * Gapless: how long before the outgoing track's end the incoming one is
- * started, to cover the time it takes to start making sound. QA measured
- * about 100 ms from A's end to B's `playing` (Nov 10, round 16, Dark Side
- * of the Moon); tune from the `[gapless] gap` lines in the app log.
+ * started, to cover the time it takes to start making sound. At 90 ms QA
+ * measured overlaps of 24 to 62 ms, median 26 (Nov 10, round 18), so B
+ * takes about 64 ms to sound; 60 puts 6 of those 7 handoffs within 20 ms.
+ * Tune from the `[gapless] gap` lines in the app log.
  */
-export const GAPLESS_HEAD_START_MS = 90;
+export const GAPLESS_HEAD_START_MS = 60;
 /** B ramps up from 0 over this long, so a small overlap can't click. */
 export const GAPLESS_RAMP_MS = 15;
 
