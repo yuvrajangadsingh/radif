@@ -19,6 +19,7 @@ import {
   fadeNow,
   GAPLESS_HEAD_START_MS,
   handoffBlocked,
+  MIN_FADE_S,
   PREP_LEAD_S,
   SKIP_RAMP_MS,
 } from "@/lib/crossfade";
@@ -307,6 +308,13 @@ export function useAudioEngine() {
     length: number;
     end: number;
     gainOut: number;
+    /** The incoming stream id, spared when degraded copies are dropped
+     *  once the outgoing file is no longer being read. A skip mid-fade
+     *  leaves that to the normal load it starts. */
+    keep: string;
+    /** Stall check: the outgoing clock's last value and when it changed. */
+    lastT: number;
+    movedAt: number;
   } | null>(null);
   // An element ramping to silence after a skip mid-fade; not reusable yet.
   const releasingRef = useRef<HTMLVideoElement | null>(null);
@@ -1100,17 +1108,24 @@ export function useAudioEngine() {
       void saveTrackMeta(streamVideoId, st.queue[st.index]);
       // It reported its length while idle, when nothing listened.
       idle.dispatchEvent(new Event("durationchange"));
-      if (handoff.fade > 0) {
+      idle.muted = st.muted;
+      // The fade was measured a tick or more ago; fade over what's left.
+      const fade = Math.min(handoff.fade, handoff.end - out.currentTime);
+      if (fade >= MIN_FADE_S) {
         fadeRef.current = {
           tail: out,
           from: out.currentTime,
-          length: handoff.fade,
+          length: fade,
           end: handoff.end,
           gainOut: handoff.gainOut,
+          keep: streamVideoId,
+          lastT: out.currentTime,
+          movedAt: performance.now(),
         };
         idle.volume = 0;
       } else {
         emptyElement(out);
+        evictDegraded(streamVideoId);
         idle.volume = masterVolume();
         const lastUpdate = lastTimeUpdateAtRef.current;
         idle.addEventListener(
@@ -1123,9 +1138,9 @@ export function useAudioEngine() {
         );
       }
       appLog(
-        `[crossfade] handoff to ${streamVideoId} (${handoff.fade > 0 ? `${handoff.fade.toFixed(1)}s fade` : "gapless"})`,
+        `[crossfade] handoff to ${streamVideoId} (${fade >= MIN_FADE_S ? `${fade.toFixed(1)}s fade` : "gapless"})`,
       );
-      if (st.playing) void playLocal(idle).catch(() => {});
+      if (st.playing) playOrRecover(idle, token);
       return;
     }
     cutTail();
@@ -1834,29 +1849,46 @@ export function useAudioEngine() {
       if (f) {
         const tail = f.tail;
         if (isCasting()) return cutTail();
+        const g = fadeGains((tail.currentTime - f.from) / f.length);
+        // The fade runs on the outgoing clock, so a stalled or failed
+        // outgoing stream would leave the incoming one quiet: give up on it.
+        const now = performance.now();
+        if (tail.currentTime !== f.lastT || !s.playing || tail.paused) {
+          f.lastT = tail.currentTime;
+          f.movedAt = now;
+        }
+        const stuck = !!tail.error || now - f.movedAt > 1500;
+        if (g.in >= 1 || tail.ended || tail.currentTime >= f.end || stuck) {
+          fadeRef.current = null;
+          emptyElement(tail);
+          evictDegraded(f.keep);
+          el.muted = s.muted;
+          el.volume = masterVolume();
+          appLog("[crossfade] done");
+          return;
+        }
         if (!s.playing) {
           if (!tail.paused) tail.pause();
         } else if (tail.paused && !el.paused) {
           void playLocal(tail).catch(() => {});
         }
-        const g = fadeGains((tail.currentTime - f.from) / f.length);
         // The slider is read every tick, so moving it mid-fade works.
         const v = Math.max(0, Math.min(1, s.volume)) ** 3;
         tail.muted = s.muted;
         el.muted = s.muted;
         tail.volume = Math.min(1, v * f.gainOut * g.out);
         el.volume = Math.min(1, v * loudnessGainRef.current * g.in);
-        if (g.in >= 1 || tail.ended || tail.currentTime >= f.end) {
-          fadeRef.current = null;
-          emptyElement(tail);
-          el.volume = masterVolume();
-          appLog("[crossfade] done");
-        }
         return;
       }
 
       const cur = s.index >= 0 ? s.queue[s.index] : undefined;
-      const next = s.queue[s.index + 1];
+      // What next() will play. A shuffled repeat-all wrap reshuffles, so its
+      // first track isn't known until then.
+      const next =
+        s.queue[s.index + 1] ??
+        (s.repeat === "all" && !s.shuffle && s.queue.length > 1
+          ? s.queue[0]
+          : undefined);
       const ts = useTrackSourceStore.getState();
       const why = handoffBlocked({
         hasNext: !!cur && !!next,
@@ -1929,8 +1961,14 @@ export function useAudioEngine() {
           advanceAfterTrack();
         return;
       }
-      const nextLen = correctedDuration(next.duration, idle.duration);
-      const length = fadeLength(settings.crossfadeSeconds, end, nextLen);
+      // The rows' own lengths too: correctedDuration leaves a doubled
+      // header under 30 s alone, and the 10 s floor must still hold.
+      const curLen = Math.min(end, cur.duration || Infinity);
+      const nextLen = Math.min(
+        correctedDuration(next.duration, idle.duration),
+        next.duration || Infinity,
+      );
+      const length = fadeLength(settings.crossfadeSeconds, curLen, nextLen);
       const fade = fadeNow(pos, end, length);
       if (fade !== null) {
         handoffRef.current = {
@@ -1942,7 +1980,9 @@ export function useAudioEngine() {
           gainOut: loudnessGainRef.current,
         };
         advanceAfterTrack();
-      } else if (length === 0 && settings.gapless) {
+      } else if (settings.gapless && (length === 0 || pos >= end - length)) {
+        // Gapless, or too late in the fade window to fade: start from the
+        // end latch.
         handoffRef.current = {
           slot: slotId,
           streamId,
