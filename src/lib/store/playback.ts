@@ -6,7 +6,11 @@ import {
 } from "zustand/middleware";
 import { emit } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import type { ShelfItem, Thumbnail } from "@/lib/innertube/types";
+import type {
+  MinimalArtist,
+  ShelfItem,
+  Thumbnail,
+} from "@/lib/innertube/types";
 import { isFloatingPlayerWindow } from "@/lib/floating-player";
 import { isCasting } from "@/lib/store/cast";
 import { isDisliked } from "@/lib/store/disliked";
@@ -33,7 +37,7 @@ export type QueueTrack = {
   videoId: string;
   title: string;
   subtitle?: string;
-  artists?: { id?: string; name: string }[];
+  artists?: MinimalArtist[];
   album?: string;
   /** Browse id ("MPREb_…") behind "Go to album" in the player menu. */
   albumId?: string;
