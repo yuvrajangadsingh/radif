@@ -23,7 +23,7 @@
   </p>
 
   <a href="../../releases/latest">
-    <img src="https://img.shields.io/badge/%E2%AC%87%20Download%20for%20macOS-3A2D7A?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS" height="52" />
+    <img src="https://img.shields.io/badge/%E2%AC%87%20Download%20for%20macOS-FF0033?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS" height="52" />
   </a>
 
   <br /><br />
