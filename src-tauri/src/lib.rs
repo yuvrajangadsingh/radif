@@ -5371,7 +5371,7 @@ fn runtime_icon(app: &tauri::AppHandle) -> tauri::image::Image<'static> {
 /// turns white on a dark bar and black on a light one and stays legible when
 /// the wallpaper changes underneath. The full-colour app icon can't do that —
 /// it sat there as a red dot that ignored the system appearance. This is the
-/// same play glyph with the disc dropped, black on transparency.
+/// app icon's note glyph with the squircle dropped, black on transparency.
 ///
 /// Everywhere else keeps the app icon: Linux trays expect colour.
 fn tray_icon(app: &tauri::AppHandle) -> tauri::image::Image<'static> {
