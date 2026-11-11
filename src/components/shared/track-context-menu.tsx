@@ -70,6 +70,7 @@ import {
 } from "@/lib/innertube/mutations";
 import { usePlaybackStore } from "@/lib/store/playback";
 import type { ShelfItem } from "@/lib/innertube/types";
+import { dropPlaylistEntry } from "@/lib/playlist-cache";
 import { syncLastfmLove } from "@/lib/lastfm";
 
 type TrackContext = { tracks: ShelfItem[]; index: number };
@@ -234,24 +235,7 @@ export function useTrackMenuController(item: ShelfItem) {
     };
     try {
       await removeFromPlaylist(removal.playlistId, item.id, setVideoId);
-      // Drop the row from every cached playlist page in place instead of
-      // invalidating: an invalidation refetches ALL loaded pages of the
-      // infinite query, which on a large playlist is 100+ requests.
-      // setVideoId is unique per playlist entry, so matching on it can't
-      // touch other playlists' caches (or a duplicate of the same song).
-      qc.setQueriesData<{
-        pages: { tracks: ShelfItem[] }[];
-        pageParams: unknown[];
-      }>({ queryKey: ["playlist-pages"] }, (old) => {
-        if (!old) return old;
-        return {
-          ...old,
-          pages: old.pages.map((p) => ({
-            ...p,
-            tracks: p.tracks.filter((t) => t.setVideoId !== setVideoId),
-          })),
-        };
-      });
+      await dropPlaylistEntry(qc, removal.playlistId, setVideoId);
       toast.success("Removed from playlist", {
         action: { label: "Undo", onClick: () => void undoRemove() },
       });
