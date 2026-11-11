@@ -71,6 +71,10 @@ import {
 import { usePlaybackStore } from "@/lib/store/playback";
 import type { ShelfItem } from "@/lib/innertube/types";
 import { dropPlaylistEntry } from "@/lib/playlist-cache";
+import {
+  invalidateLikedLists,
+  markLibraryTracksStale,
+} from "@/lib/liked-cache";
 import { syncLastfmLove } from "@/lib/lastfm";
 
 type TrackContext = { tracks: ShelfItem[]; index: number };
@@ -162,6 +166,7 @@ export function useTrackMenuController(item: ShelfItem) {
           ...list,
         ];
       });
+      invalidateLikedLists(qc);
       toast.success("Added to Liked songs");
       syncLastfmLove(item, true);
     } catch (e) {
@@ -174,6 +179,7 @@ export function useTrackMenuController(item: ShelfItem) {
       qc.setQueryData<ShelfItem[]>(["liked-songs"], (old) =>
         (old ?? []).filter((t) => t.id !== item.id),
       );
+      invalidateLikedLists(qc);
       toast.success("Removed from Liked songs");
       syncLastfmLove(item, false);
     } catch (e) {
@@ -186,6 +192,7 @@ export function useTrackMenuController(item: ShelfItem) {
       qc.setQueryData<ShelfItem[]>(["liked-songs"], (old) =>
         (old ?? []).filter((t) => t.id !== item.id),
       );
+      invalidateLikedLists(qc);
       toast.success("Marked as not interested");
       syncLastfmLove(item, false);
     } catch (e) {
@@ -209,6 +216,7 @@ export function useTrackMenuController(item: ShelfItem) {
       // The playlist page keys its data as ["playlist-pages", id] (with a
       // possibly VL-prefixed id), so ["playlist", p.id] never matched and
       // the invalidation was a no-op. Prefix-match every open playlist page.
+      markLibraryTracksStale(qc);
       await qc.invalidateQueries({ queryKey: ["playlist-pages-v2"] });
       toast.success(`Added to ${p.title}`);
     } catch (e) {
@@ -227,6 +235,7 @@ export function useTrackMenuController(item: ShelfItem) {
         // The removed entry may have been one of two copies; the undo puts
         // that copy back, so YouTube's duplicate check has to be skipped.
         await addToPlaylist(removal.playlistId, item.id, { force: true });
+        markLibraryTracksStale(qc);
         await qc.invalidateQueries({ queryKey: ["playlist-pages-v2"] });
         toast.success("Added back (at the end of the playlist)");
       } catch (e) {
@@ -236,6 +245,8 @@ export function useTrackMenuController(item: ShelfItem) {
     try {
       await removeFromPlaylist(removal.playlistId, item.id, setVideoId);
       await dropPlaylistEntry(qc, removal.playlistId, setVideoId);
+      // The Storage tab's in-library list is built from playlist membership.
+      markLibraryTracksStale(qc);
       toast.success("Removed from playlist", {
         action: { label: "Undo", onClick: () => void undoRemove() },
       });
@@ -582,6 +593,7 @@ export function NewPlaylistDialog({
     setBusy(true);
     try {
       await createPlaylistWithTrack(t, videoId);
+      markLibraryTracksStale(qc);
       await qc.invalidateQueries({ queryKey: ["user-playlists"] });
       await qc.invalidateQueries({ queryKey: ["library"] });
       toast.success(`Created "${t}"`);
