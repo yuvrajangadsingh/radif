@@ -99,6 +99,16 @@ export const WHATS_NEW: WhatsNewEntry[] = [
         title: "Small windows",
         text: "At the smallest window height the cover shrinks so the title and controls stay in view.",
       },
+      {
+        type: "fixed",
+        title: "Remove from playlist",
+        text: "The song leaves the playlist page right away.",
+      },
+      {
+        type: "fixed",
+        title: "Edits from the right-click menu",
+        text: "Likes, dislikes and playlist edits made from a song's menu show in Liked songs, the playlist page and the Storage tab without a relaunch.",
+      },
     ],
   },
   {
