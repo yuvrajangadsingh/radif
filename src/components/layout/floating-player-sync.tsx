@@ -107,7 +107,9 @@ type PlaybackAction =
   | { type: "goTo"; index: number }
   | { type: "removeAt"; index: number }
   | { type: "moveTrack"; from: number; to: number }
+  | { type: "playNextAt"; from: number }
   | { type: "clearQueue" }
+  | { type: "undoClear" }
   | { type: "appendToQueue"; tracks: unknown[] }
   | { type: "setAutoRadio"; on: boolean }
   | { type: "playNow"; track: unknown; extras?: unknown }
@@ -212,8 +214,14 @@ export function FloatingPlayerSync() {
           case "moveTrack":
             store.moveTrack(a.from, a.to);
             break;
+          case "playNextAt":
+            store.playNextAt(a.from);
+            break;
           case "clearQueue":
             store.clearQueue();
+            break;
+          case "undoClear":
+            store.undoClear();
             break;
           case "appendToQueue":
             // Tracks arrive as serialized QueueTrack-shaped objects;

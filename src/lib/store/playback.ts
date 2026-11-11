@@ -49,6 +49,8 @@ export type QueueTrack = {
    * other version rather than a fuzzy search.
    */
   counterpartId?: string;
+  /** Put here with Play next. Shuffle leaves these at the top. */
+  queuedNext?: boolean;
 };
 
 export type RepeatMode = "off" | "all" | "one";
@@ -94,6 +96,9 @@ export type PlaybackState = {
   /** How many times the queue has run out (last track done, repeat off):
    *  lets the audio engine tell that stop from a pause. */
   queueEnded: number;
+  /** Bumped when a failed song is played again in its own slot: the slot
+   *  doesn't change there, so this is what tells the engine to reload. */
+  reloads: number;
   /** Real duration (from audio element, once loaded). */
   duration: number;
   /** When the user drags the slider, we seek here on release. */
@@ -101,6 +106,14 @@ export type PlaybackState = {
   /** Set once at launch from the saved playhead: the engine's first load
    *  of this track seeks here, and the field is cleared when it does. */
   resumeAt?: { videoId: string; seconds: number };
+  /** What Clear queue removed, for its Undo. Not persisted. */
+  cleared?: {
+    queue: QueueTrack[];
+    index: number;
+    position: number;
+    playing: boolean;
+    queueContinuation?: string;
+  };
 
   /** When true, auto-append radio tracks to the queue when the last one ends. */
   autoRadio: boolean;
@@ -124,7 +137,11 @@ export type PlaybackState = {
   appendToQueue: (tracks: (QueueTrack | ShelfItem)[]) => void;
   removeAt: (index: number) => void;
   moveTrack: (from: number, to: number) => void;
+  /** Play next on an Up next row: move it right after the current track. */
+  playNextAt: (from: number) => void;
   clearQueue: () => void;
+  /** Put back what Clear queue removed, where it was and as it was. */
+  undoClear: () => void;
   setAutoRadio: (on: boolean) => void;
   setQueueContinuation: (token?: string) => void;
 
@@ -181,6 +198,13 @@ function fisherYates<T>(arr: readonly T[]): T[] {
     [result[i], result[j]] = [result[j], result[i]];
   }
   return result;
+}
+
+/** Shuffle what's up next, leaving songs put there with Play next at the
+ *  top in their order, as Spotify and YouTube Music do. */
+function shuffleUpcoming(upcoming: readonly QueueTrack[]): QueueTrack[] {
+  const picked = upcoming.filter((t) => t.queuedNext);
+  return [...picked, ...fisherYates(upcoming.filter((t) => !t.queuedNext))];
 }
 
 const MAX_PERSISTED_QUEUE_TRACKS = 300;
@@ -253,9 +277,9 @@ export function createThrottledStorage(delay = 1000): StateStorage {
  *  what's playing, clicking its card) loads nothing, so resetting here
  *  left a spinner and a 0:00 duration that nothing ever cleared. It just keeps
  *  playing. Start radio also moves a song from later in the queue to the
- *  front: a new queue holding it once keeps it too, while it plays. A paused
- *  or finished one loads from the start there (an end guard's last
- *  timeupdate can leave a stale position), as does a queue with two copies. */
+ *  front: a new queue holding it once keeps it too, playing or paused, the
+ *  way it does at index 0 (a finished one was rewound by next()). A failed
+ *  one loads again, as does a queue with two copies. */
 function slotChange(
   s: PlaybackState,
   queue: QueueTrack[],
@@ -263,11 +287,17 @@ function slotChange(
 ): Partial<PlaybackState> {
   const current = s.queue[s.index]?.videoId;
   if (current !== queue[i].videoId) return reset(queue, i);
-  if (s.index === i) return {};
+  // A failed song reloads even in its own slot: playing the dead element
+  // again does nothing.
+  if (s.index === i) {
+    return s.status === "error"
+      ? { ...reset(queue, i), reloads: s.reloads + 1 }
+      : {};
+  }
   const moved =
     queue !== s.queue &&
-    s.playing &&
-    s.status !== "error" &&
+    // Paused, only once it loaded: a paused stalled load gets a fresh one.
+    (s.playing ? s.status !== "error" : s.status === "ready") &&
     queue.filter((t) => t.videoId === current).length === 1;
   return moved ? {} : reset(queue, i);
 }
@@ -304,6 +334,7 @@ const playbackStateCreator: StateCreator<PlaybackState> = (set, get) => ({
   position: 0,
   duration: 0,
   queueEnded: 0,
+  reloads: 0,
   pendingSeek: undefined,
 
   playNow: (track, extras) => {
@@ -314,7 +345,7 @@ const playbackStateCreator: StateCreator<PlaybackState> = (set, get) => ({
       : [mapped];
     // Honour an active shuffle for the trailing tracks (current stays first).
     if (get().shuffle && queue.length > 1) {
-      queue = [queue[0], ...fisherYates(queue.slice(1))];
+      queue = [queue[0], ...shuffleUpcoming(queue.slice(1))];
     }
     set({
       queue,
@@ -332,7 +363,10 @@ const playbackStateCreator: StateCreator<PlaybackState> = (set, get) => ({
     // the upcoming portion, matching setShuffle's semantics.
     let queue = tracks;
     if (get().shuffle) {
-      queue = [...tracks.slice(0, i + 1), ...fisherYates(tracks.slice(i + 1))];
+      queue = [
+        ...tracks.slice(0, i + 1),
+        ...shuffleUpcoming(tracks.slice(i + 1)),
+      ];
     }
     set({
       queue,
@@ -381,7 +415,7 @@ const playbackStateCreator: StateCreator<PlaybackState> = (set, get) => ({
     set((s) => {
       const next = [...s.queue];
       const insertAt = s.index < 0 ? 0 : s.index + 1;
-      next.splice(insertAt, 0, mapped);
+      next.splice(insertAt, 0, { ...mapped, queuedNext: true });
       return { queue: next };
     });
   },
@@ -445,7 +479,9 @@ const playbackStateCreator: StateCreator<PlaybackState> = (set, get) => ({
       if (to < 0 || to >= s.queue.length) return s;
       const next = s.queue.slice();
       const [item] = next.splice(from, 1);
-      next.splice(to, 0, item);
+      // A song dragged by hand gives up its Play next place.
+      const moved = item.queuedNext ? { ...item, queuedNext: undefined } : item;
+      next.splice(to, 0, moved);
       // Keep the same track current after reorder. If the active track
       // itself is the one being moved, follow it to its new position.
       // Otherwise, account for items shifting around it.
@@ -461,8 +497,20 @@ const playbackStateCreator: StateCreator<PlaybackState> = (set, get) => ({
     });
   },
 
+  playNextAt: (from) => {
+    const { queue, index } = get();
+    // An Up next row: it moves up past nothing current, so index stays.
+    if (from <= index || from >= queue.length) return;
+    const next = queue.slice();
+    const [item] = next.splice(from, 1);
+    next.splice(index + 1, 0, { ...item, queuedNext: true });
+    set({ queue: next });
+  },
+
   clearQueue: () => {
+    const { queue, index, position, playing, queueContinuation } = get();
     set({
+      cleared: { queue, index, position, playing, queueContinuation },
       queue: [],
       index: -1,
       status: "idle",
@@ -471,6 +519,31 @@ const playbackStateCreator: StateCreator<PlaybackState> = (set, get) => ({
       position: 0,
       duration: 0,
       queueContinuation: undefined,
+    });
+  },
+
+  undoClear: () => {
+    const c = get().cleared;
+    if (!c) return;
+    const track = c.queue[c.index];
+    set({
+      cleared: undefined,
+      queue: c.queue,
+      index: c.index,
+      queueContinuation: c.queueContinuation,
+      status: track ? "loading" : "idle",
+      streamUrl: undefined,
+      error: undefined,
+      position: c.position,
+      duration: track?.duration ?? 0,
+      playing: c.playing,
+      // A seek meant for whatever played since the clear.
+      pendingSeek: undefined,
+      // The reload seeks back here, the way a launch resume does.
+      resumeAt:
+        track && c.position > 0
+          ? { videoId: track.videoId, seconds: c.position }
+          : undefined,
     });
   },
 
@@ -485,6 +558,15 @@ const playbackStateCreator: StateCreator<PlaybackState> = (set, get) => ({
     // happening, so drive it and let its next status set `playing` here.
     // Setting it locally too would race the status back and forth.
     if (castCommand(playing ? "cast_pause" : "cast_play")) return;
+    // Play on a failed, stopped song (its row, the play button) tries it
+    // again, the way landing on its slot does. One that still wants to play
+    // (the stall watchdog's give-up) pauses as before: the sleep timer
+    // pauses through here.
+    const { index, status } = get();
+    if (status === "error" && !playing && index >= 0) {
+      set({ ...slotChange(get(), queue, index), playing: true });
+      return;
+    }
     set({ playing: !playing });
   },
 
@@ -508,7 +590,14 @@ const playbackStateCreator: StateCreator<PlaybackState> = (set, get) => ({
     let nextIndex = index + 1;
     if (nextIndex >= queue.length) {
       if (repeat !== "all") {
-        set({ playing: false, position: 0, queueEnded: get().queueEnded + 1 });
+        // Rewind too: an outro or end guard stops the element mid-file, and
+        // a later play of this slot (Play, Start radio) must start it over.
+        set({
+          playing: false,
+          position: 0,
+          pendingSeek: 0,
+          queueEnded: get().queueEnded + 1,
+        });
         return;
       }
       // Looping with shuffle on → reshuffle so the next pass isn't identical.
@@ -605,7 +694,7 @@ const playbackStateCreator: StateCreator<PlaybackState> = (set, get) => ({
       // through tracks the user actually heard.
       const after = Math.max(0, s.index + 1);
       const head = s.queue.slice(0, after);
-      const tail = fisherYates(s.queue.slice(after));
+      const tail = shuffleUpcoming(s.queue.slice(after));
       return { shuffle: true, queue: [...head, ...tail] };
     });
   },
@@ -668,6 +757,16 @@ usePlaybackStore.subscribe((s) => {
   }
 });
 
+// Reaching a Play next song, by any path (next, prev, a click, a removed
+// row, a new queue), uses up its place at the top.
+usePlaybackStore.subscribe((s) => {
+  const t = s.queue[s.index];
+  if (!t?.queuedNext) return;
+  const queue = s.queue.slice();
+  queue[s.index] = { ...t, queuedNext: undefined };
+  usePlaybackStore.setState({ queue });
+});
+
 /** Convenience selector for the currently-playing track (or undefined). */
 export function currentTrack(state: PlaybackState): QueueTrack | undefined {
   if (state.index < 0 || state.index >= state.queue.length) return undefined;
@@ -727,7 +826,9 @@ export function initFloatingPlaybackBridge(): void {
     goTo: (index) => sendAction({ type: "goTo", index }),
     removeAt: (index) => sendAction({ type: "removeAt", index }),
     moveTrack: (from, to) => sendAction({ type: "moveTrack", from, to }),
+    playNextAt: (from) => sendAction({ type: "playNextAt", from }),
     clearQueue: () => sendAction({ type: "clearQueue" }),
+    undoClear: () => sendAction({ type: "undoClear" }),
     appendToQueue: (tracks) =>
       sendAction({ type: "appendToQueue", tracks: tracks as unknown[] }),
     setAutoRadio: (on) => sendAction({ type: "setAutoRadio", on }),

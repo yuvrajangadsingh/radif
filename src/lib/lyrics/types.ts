@@ -21,4 +21,12 @@ export type Lyrics =
        *  a padded/different cut and auto-align. */
       recordDurationSec?: number;
     }
-  | { kind: "plain"; text: string; source?: string };
+  | {
+      kind: "plain";
+      text: string;
+      source?: string;
+      /** None of the title's main words in it: maybe another song's. The
+       *  auto pick takes it only when no other unskipped source has lyrics;
+       *  picking the source by hand still shows it. */
+      offTitle?: boolean;
+    };

@@ -58,6 +58,7 @@ export function QueueBody({ onClose }: { onClose?: () => void }) {
   const toggle = usePlaybackStore((s) => s.toggle);
   const removeAt = usePlaybackStore((s) => s.removeAt);
   const moveTrack = usePlaybackStore((s) => s.moveTrack);
+  const playNextAt = usePlaybackStore((s) => s.playNextAt);
   const clearQueue = usePlaybackStore((s) => s.clearQueue);
   const setAutoRadio = usePlaybackStore((s) => s.setAutoRadio);
 
@@ -70,15 +71,14 @@ export function QueueBody({ onClose }: { onClose?: () => void }) {
   // way back. Undo beats a confirm dialog here: clearing stays one
   // click, and the snapshot restores both tracks and playing position.
   const handleClearQueue = () => {
-    const s = usePlaybackStore.getState();
-    const tracks = s.queue;
-    const at = s.index;
     clearQueue();
+    // One toast: a newer clear replaces an older Undo, which would now
+    // restore the newer snapshot.
     toast("Queue cleared", {
+      id: "queue-cleared",
       action: {
         label: "Undo",
-        onClick: () =>
-          usePlaybackStore.getState().setQueue(tracks, Math.max(0, at)),
+        onClick: () => usePlaybackStore.getState().undoClear(),
       },
     });
   };
@@ -171,7 +171,7 @@ export function QueueBody({ onClose }: { onClose?: () => void }) {
               onGoTo={goTo}
               onRemoveAt={removeAt}
               onMoveTrack={moveTrack}
-              onPlayNext={(i) => moveTrack(i, index + 1)}
+              onPlayNext={playNextAt}
             />
           ) : (
             <HistoryTabBody

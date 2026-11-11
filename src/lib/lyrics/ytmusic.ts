@@ -8,10 +8,10 @@ import { LyricsHttpError } from "@/lib/lyrics/errors";
  *
  * Structurally different from the other providers, and that is the
  * entire point: this one is keyed on the track's videoId, not on a fuzzy
- * title/artist string. It cannot return another song's words. Every
- * "wrong lyrics" report is a string-matching failure, and there is no
- * string matching here — which is also why `sources.ts` does NOT gate it on
- * the `verifiable` (artist-known) check the other providers need.
+ * title/artist string, which is why `sources.ts` does NOT gate it on the
+ * `verifiable` (artist-known) check the other providers need. It can still
+ * hand back another song's words: YTM attached the wrong lyrics to a live
+ * video once (see `markOffTitle` in plausibility.ts).
  *
  * Two hops:
  *   1. `/next` with the videoId returns the watch page's tabs. One of them

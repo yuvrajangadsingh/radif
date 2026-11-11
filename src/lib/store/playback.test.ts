@@ -87,6 +87,7 @@ describe("playback next()", () => {
     expect(s.index).toBe(1);
     expect(s.playing).toBe(false);
     expect(s.position).toBe(0);
+    expect(s.pendingSeek).toBe(0);
   });
 
   it("counts a queue end so the engine can tell it from a pause", () => {
@@ -274,6 +275,40 @@ describe("landing on the slot already playing", () => {
     kept();
   });
 
+  it("keeps a paused song where it paused when Start radio moves it (QA r5 N1)", () => {
+    setup({
+      ...playing,
+      queue: [track("x"), track("y"), track("a")],
+      index: 2,
+      playing: false,
+    });
+    usePlaybackStore
+      .getState()
+      .playNow({ kind: "song", id: "a", title: "a", thumbnails: [] }, [
+        track("b"),
+      ]);
+    expect(usePlaybackStore.getState().index).toBe(0);
+    expect(usePlaybackStore.getState().pendingSeek).toBeUndefined();
+    kept();
+  });
+
+  it("starts a finished song over when Start radio moves it", () => {
+    setup({ ...playing, queue: [track("x"), track("a")], index: 1 });
+    usePlaybackStore.getState().next();
+    expect(usePlaybackStore.getState().pendingSeek).toBe(0);
+    // The engine rewinds the paused element and consumes the seek.
+    usePlaybackStore.getState().clearPendingSeek();
+    usePlaybackStore
+      .getState()
+      .playNow({ kind: "song", id: "a", title: "a", thumbnails: [] }, [
+        track("b"),
+      ]);
+    const s = usePlaybackStore.getState();
+    expect(s.streamUrl).toBe("blob:a");
+    expect(s.position).toBe(0);
+    expect(s.playing).toBe(true);
+  });
+
   it("still reloads for another song or another slot of the same song", () => {
     setup(playing);
     usePlaybackStore.getState().setQueue([track("b")], 0);
@@ -284,7 +319,48 @@ describe("landing on the slot already playing", () => {
     expect(usePlaybackStore.getState().streamUrl).toBeUndefined();
   });
 
-  it("reloads for a queue with two copies, a failed song and a finished one", () => {
+  it("reloads a failed song when its row or play is clicked (QA r8 N2)", () => {
+    setup({ ...playing, status: "error", playing: false });
+    const before = usePlaybackStore.getState().reloads;
+    usePlaybackStore.getState().toggle();
+    const s = usePlaybackStore.getState();
+    expect(s.status).toBe("loading");
+    expect(s.streamUrl).toBeUndefined();
+    expect(s.playing).toBe(true);
+    expect(s.reloads).toBe(before + 1);
+    // A failed one that still wants to play pauses (the sleep timer).
+    setup({ ...playing, status: "error" });
+    usePlaybackStore.getState().toggle();
+    expect(usePlaybackStore.getState().playing).toBe(false);
+    expect(usePlaybackStore.getState().reloads).toBe(before + 1);
+    // A healthy one just pauses.
+    setup(playing);
+    usePlaybackStore.getState().toggle();
+    expect(usePlaybackStore.getState().playing).toBe(false);
+    expect(usePlaybackStore.getState().streamUrl).toBe("blob:a");
+  });
+
+  it("reloads a failed song on its own slot", () => {
+    setup({ ...playing, queue: [track("a"), track("b")], status: "error" });
+    const before = usePlaybackStore.getState().reloads;
+    usePlaybackStore.getState().goTo(0);
+    expect(usePlaybackStore.getState().status).toBe("loading");
+    expect(usePlaybackStore.getState().streamUrl).toBeUndefined();
+    expect(usePlaybackStore.getState().reloads).toBe(before + 1);
+    // A healthy one keeps playing and doesn't ask for a reload.
+    setup({ ...playing, queue: [track("a"), track("b")] });
+    usePlaybackStore.getState().goTo(0);
+    expect(usePlaybackStore.getState().reloads).toBe(before + 1);
+    setup({ ...playing, status: "error", playing: false });
+    usePlaybackStore
+      .getState()
+      .playNow({ kind: "song", id: "a", title: "a", thumbnails: [] }, [
+        track("b"),
+      ]);
+    expect(usePlaybackStore.getState().streamUrl).toBeUndefined();
+  });
+
+  it("reloads for two copies, a failed song and a paused load", () => {
     const radio = () =>
       usePlaybackStore
         .getState()
@@ -311,15 +387,139 @@ describe("landing on the slot already playing", () => {
     });
     radio();
     expect(usePlaybackStore.getState().streamUrl).toBeUndefined();
-    // The end of the queue: next() stops, and a late timeupdate can still
-    // write the old position.
+    // Paused while its stream was still loading.
     setup({
       ...playing,
       queue: [track("x"), track("a")],
       index: 1,
+      status: "loading",
+      playing: false,
     });
-    usePlaybackStore.setState({ playing: false });
     radio();
     expect(usePlaybackStore.getState().streamUrl).toBeUndefined();
+  });
+});
+
+describe("shuffle after Play next", () => {
+  beforeEach(() => setup({}));
+
+  it("keeps Play next songs at the top and shuffles the rest", () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const rest = "cdefghijkl".split("").map(track);
+    setup({ queue: [track("a"), track("b"), ...rest], index: 0 });
+    const s = usePlaybackStore.getState();
+    s.enqueueNext(track("x"));
+    s.playNextAt(5); // "e", from Up next
+    s.setShuffle(true);
+    const q = usePlaybackStore.getState().queue.map((t) => t.videoId);
+    expect(q.slice(0, 3)).toEqual(["a", "e", "x"]);
+    // Math.random 0 makes Fisher-Yates a fixed rotation of the rest.
+    expect(q.slice(3)).toEqual("cdfghijklb".split(""));
+    expect(usePlaybackStore.getState().index).toBe(0);
+    vi.restoreAllMocks();
+  });
+
+  it("keeps them at the top when a queue is set with shuffle on (Undo)", () => {
+    const queue = [track("a"), { ...track("x"), queuedNext: true }];
+    queue.push(..."bcdefgh".split("").map(track));
+    setup({ shuffle: true });
+    usePlaybackStore.getState().setQueue(queue, 0);
+    const q = usePlaybackStore.getState().queue.map((t) => t.videoId);
+    expect(q.slice(0, 2)).toEqual(["a", "x"]);
+  });
+
+  it("uses up the place when a removed row or a new queue makes it current", () => {
+    setup({ queue: [track("a"), track("b")], index: 0 });
+    usePlaybackStore.getState().enqueueNext(track("x"));
+    usePlaybackStore.getState().removeAt(0);
+    expect(usePlaybackStore.getState().queue[0].queuedNext).toBeUndefined();
+    setup({});
+    usePlaybackStore
+      .getState()
+      .setQueue([{ ...track("y"), queuedNext: true }, track("z")], 0);
+    expect(usePlaybackStore.getState().queue[0].queuedNext).toBeUndefined();
+  });
+
+  it("uses up a song's place once it's reached", () => {
+    setup({ queue: [track("a"), track("b"), track("c")], index: 0 });
+    usePlaybackStore.getState().enqueueNext(track("x"));
+    usePlaybackStore.getState().next();
+    expect(usePlaybackStore.getState().queue[1].queuedNext).toBeUndefined();
+    usePlaybackStore.getState().playNextAt(3);
+    usePlaybackStore.getState().goTo(2);
+    expect(usePlaybackStore.getState().queue[2].queuedNext).toBeUndefined();
+    // Skipped past, then reached with Previous.
+    setup({ queue: [track("a"), track("b")], index: 0, position: 0 });
+    usePlaybackStore.getState().enqueueNext(track("x"));
+    usePlaybackStore.getState().goTo(2);
+    usePlaybackStore.setState({ position: 0 });
+    usePlaybackStore.getState().prev();
+    expect(usePlaybackStore.getState().index).toBe(1);
+    expect(usePlaybackStore.getState().queue[1].queuedNext).toBeUndefined();
+  });
+
+  it("lets a dragged Play next song be shuffled (QA r9 N2)", () => {
+    setup({ queue: "abcdef".split("").map(track), index: 0 });
+    usePlaybackStore.getState().playNextAt(4); // "e" to the top
+    usePlaybackStore.getState().moveTrack(1, 4); // dragged down
+    expect(usePlaybackStore.getState().queue[4].queuedNext).toBeUndefined();
+  });
+
+  it("moves an Up next row right after the playing song", () => {
+    setup({ queue: [track("a"), track("b"), track("c")], index: 1 });
+    usePlaybackStore.getState().playNextAt(0); // history row: ignored
+    usePlaybackStore.getState().playNextAt(1); // the playing one: ignored
+    expect(usePlaybackStore.getState().queue.map((t) => t.videoId)).toEqual([
+      "a",
+      "b",
+      "c",
+    ]);
+    usePlaybackStore.getState().playNextAt(2);
+    const s = usePlaybackStore.getState();
+    expect(s.queue[2].queuedNext).toBe(true);
+    expect(s.index).toBe(1);
+  });
+});
+
+describe("Undo after Clear queue (QA r9)", () => {
+  it("puts the queue back where it was, paused or playing", () => {
+    const queue = [track("a"), track("b"), track("c")];
+    for (const playing of [false, true]) {
+      setup({
+        queue,
+        index: 1,
+        position: 6.7,
+        playing,
+        queueContinuation: "t",
+      });
+      usePlaybackStore.getState().clearQueue();
+      expect(usePlaybackStore.getState().queue).toHaveLength(0);
+      usePlaybackStore.getState().undoClear();
+      const s = usePlaybackStore.getState();
+      expect(s.queue).toBe(queue);
+      expect(s.index).toBe(1);
+      expect(s.playing).toBe(playing);
+      expect(s.position).toBe(6.7);
+      expect(s.resumeAt).toEqual({ videoId: "b", seconds: 6.7 });
+      expect(s.queueContinuation).toBe("t");
+      expect(s.cleared).toBeUndefined();
+    }
+  });
+
+  it("drops a seek meant for what played since the clear", () => {
+    setup({ queue: [track("a")], index: 0, position: 73, playing: false });
+    usePlaybackStore.getState().clearQueue();
+    usePlaybackStore.getState().playNow(track("b"));
+    usePlaybackStore.setState({ pendingSeek: 20 });
+    usePlaybackStore.getState().undoClear();
+    const s = usePlaybackStore.getState();
+    expect(s.pendingSeek).toBeUndefined();
+    expect(s.resumeAt).toEqual({ videoId: "a", seconds: 73 });
+  });
+
+  it("does nothing without a clear to undo", () => {
+    setup({ queue: [track("a")], index: 0, cleared: undefined });
+    usePlaybackStore.getState().undoClear();
+    expect(usePlaybackStore.getState().queue).toHaveLength(1);
   });
 });

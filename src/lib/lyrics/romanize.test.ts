@@ -44,6 +44,36 @@ describe("romanize", () => {
     expect(romanize("வந்தேன்")).toBe("vandhen");
   });
 
+  it("voices a Tamil க after ழ் or ர் only in the -gal plural (QA r7 N1)", () => {
+    expect(romanize("நேர்கொண்ட")).toBe("nerkonda");
+    expect(romanize("கார்கில்")).toBe("kaarkil");
+    expect(romanize("ஆர்கெஸ்ட்ரா")).toBe("aarkestra");
+    expect(romanize("யார்கிட்ட")).toBe("yaarkitta");
+    expect(romanize("பேர்கொண்ட")).toBe("perkonda");
+    expect(romanize("உயிர்கொண்டு")).toBe("uyirkondu");
+    expect(romanize("உயிர்கள்")).toBe("uyirgal");
+    expect(romanize("மலர்களே")).toBe("malargale");
+    expect(romanize("அவள்")).toBe("aval");
+    // Suffixed compounds the word list couldn't hold (QA r8).
+    expect(romanize("கார்குழலி")).toBe("kaarkuzhali");
+    expect(romanize("மலர்கொடியே")).toBe("malarkodiye");
+    expect(romanize("கார்காலமே")).toBe("kaarkaalame");
+  });
+
+  it("voices a Tamil க after ழ் or ர் unless doubled (QA r3 N2)", () => {
+    expect(romanize("வாழ்க")).toBe("vaazhga");
+    expect(romanize("மலர்கள்")).toBe("malargal");
+    expect(romanize("தமிழ்க் கவிதை")).toBe("thamizhk kavidhai");
+    expect(romanize("சேர்தல்")).toBe("serthal");
+    expect(romanize("வளர்பிறை")).toBe("valarpirai");
+    expect(romanize("கார்குழல்")).toBe("kaarkuzhal");
+    expect(romanize("கார்காலம்")).toBe("kaarkaalam");
+    expect(romanize("மலர்கொடி")).toBe("malarkodi");
+    expect(romanize("மார்கழி")).toBe("maargazhi");
+    expect(romanize("பார்க்க")).toBe("paarkka");
+    expect(romanize("வாழ்க்கை")).toBe("vaazhkkai");
+  });
+
   it("keeps Tamil stops unvoiced when doubled or at the start", () => {
     expect(romanize("அக்கா")).toBe("akka");
     expect(romanize("அப்பா")).toBe("appa");
@@ -58,6 +88,9 @@ describe("romanize", () => {
     expect(romanize("இசை")).toBe("isai");
     expect(romanize("லக்ஷ்மி")).toBe("lakshmi");
     expect(romanize("காட்சி")).toBe("kaatchi");
+    expect(romanize("பச்சை")).toBe("pachai");
+    expect(romanize("மச்சான்")).toBe("machaan");
+    expect(romanize("உச்சம்")).toBe("ucham");
     expect(romanize("அந்தப் பாடல்")).toBe("andhap paadal");
     expect(romanize("காற்று")).toBe("kaatru");
     expect(romanize("வெற்றி")).toBe("vetri");
@@ -71,6 +104,14 @@ describe("romanize", () => {
     expect(romanize("ஃ")).toBe("h");
     expect(romanize("ஃபேன்")).toBe("fen");
     expect(romanize("காஃபி")).toBe("kaafi");
+  });
+
+  it("spells Tamil loans from a word list (QA r3 N2)", () => {
+    expect(romanize("மோகன்லால்")).toBe("mohanlal");
+    expect(romanize("தீபம்")).toBe("deepam");
+    expect(romanize("பக்தி")).toBe("bakthi");
+    expect(romanize("டாக்டர் பஸ்")).toBe("doctor bus");
+    expect(romanize("பக்\u200Dதி")).toBe("bakthi");
   });
 
   it("handles the schwa rule's edges", () => {
@@ -162,6 +203,14 @@ describe("romanize", () => {
     expect(romanize("तुमको मैं जीता हूँ")).toBe("tumko main jeeta hoon");
     expect(romanize("तू")).toBe("tu");
     expect(romanize("ਸਾਨੂੰ")).toBe("saanu");
+    expect(romanize("हुँ")).toBe("hoon");
+    expect(romanize("कहुँ")).toBe("kahoon");
+    expect(romanize("तुँ")).toBe("tu");
+    expect(romanize("सुँ")).toBe("su");
+    expect(romanize("करुँ")).toBe("karoon");
+    expect(romanize("चलुं")).toBe("chaloon");
+    expect(romanize("मैं जीता हुँ")).toBe("main jeeta hoon");
+    expect(romanize("ਤੁੰ")).toBe("tu");
   });
 
   it("puts a y glide between a short vowel and e (N3)", () => {
@@ -178,6 +227,22 @@ describe("romanize", () => {
     expect(romanize("जाए")).toBe("jaae");
     expect(romanize("गई")).toBe("gai");
     expect(romanize("कोई")).toBe("koi");
+  });
+
+  it("spells a long ee before a bare aa as iya (N3)", () => {
+    expect(romanize("ਕਾਲੀਆਂ ਗੱਡੀਆਂ")).toBe("kaaliyan gaddiyan");
+    expect(romanize("ਕੁੜੀਆਂ")).toBe("kuriyan");
+    expect(romanize("ਸਾਰੀਆਂ")).toBe("saariyan");
+    expect(romanize("ਪਿਆਰ")).toBe("piaar");
+    expect(romanize("ਜਾਨਾਂ")).toBe("jaanaan");
+  });
+
+  it("keeps a vowel letter standing alone long (QA r4)", () => {
+    expect(romanize("आ आ आ")).toBe("aa aa aa");
+    expect(romanize("ਆ")).toBe("aa");
+    expect(romanize("ऊ")).toBe("oo");
+    expect(romanize("पा")).toBe("pa");
+    expect(romanize("ना")).toBe("na");
   });
 
   it("keeps other text in a mixed line", () => {

@@ -26,6 +26,51 @@ describe("pickBest", () => {
   });
 });
 
+describe("pickBest with off-title YouTube Music text (QA r8 N1)", () => {
+  // QA round 8's six titles that are never sung: YouTube Music's plain text
+  // for their videos fails the title check against the right lyrics.
+  const titles = [
+    "Subterranean Homesick Blues",
+    "Smells Like Teen Spirit",
+    "Bullet with Butterfly Wings",
+    "Motion Picture Soundtrack",
+    "Desert Island Disk",
+    "Tomorrow Never Knows",
+  ];
+  const marked: Lyrics = { kind: "plain", text: "a", offTitle: true };
+
+  it.each(titles)("%s: LRCLIB wins when it has anything", () => {
+    for (const lrclib of [timed, plain]) {
+      const d = { ytmusic: marked, lrclib };
+      expect(pickBest((s) => d[s], [])).toBe("lrclib");
+    }
+  });
+
+  it.each(titles)("%s: shown when LRCLIB answers with nothing", () => {
+    for (const lrclib of [null, undefined]) {
+      const d = { ytmusic: marked, lrclib };
+      expect(
+        pickBest(
+          (s) => d[s],
+          [],
+          () => true,
+        ),
+      ).toBe("ytmusic");
+    }
+  });
+
+  it.each(titles)("%s: held back while LRCLIB is still looking", () => {
+    const d = { ytmusic: marked, lrclib: undefined };
+    expect(
+      pickBest(
+        (s) => d[s],
+        [],
+        (s) => s === "ytmusic",
+      ),
+    ).toBeNull();
+  });
+});
+
 describe("useLyricsSkip", () => {
   it("keeps the 200 most recently touched tracks", () => {
     const { skip } = useLyricsSkip.getState();

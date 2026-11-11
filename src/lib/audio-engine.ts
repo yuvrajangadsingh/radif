@@ -292,6 +292,16 @@ export function useAudioEngine() {
   // without any of its real deps changing — used to re-fetch a fresh
   // stream URL after a transient failure (e.g. a googlevideo 403).
   const [retryNonce, setRetryNonce] = useState(0);
+  // A failed song played again in its own slot: same slot, so reload it the
+  // way the error retry does, with its one auto-retry back.
+  const reloads = usePlaybackStore((s) => s.reloads);
+  const seenReloadsRef = useRef(reloads);
+  useEffect(() => {
+    if (reloads === seenReloadsRef.current) return;
+    seenReloadsRef.current = reloads;
+    retriedTrackRef.current = null;
+    setRetryNonce((n) => n + 1);
+  }, [reloads]);
   // See the stall watchdog below for why this is as long as it is. It
   // has to clear the whole legitimate pre-byte budget: a signed-in
   // resolve may run 30s to its ceiling, the anonymous fallback 15s more,
@@ -676,6 +686,17 @@ export function useAudioEngine() {
   const streamVideoId = useTrackSourceStore((s) =>
     videoId ? resolveStreamId(videoId, s.byVideoId, s.preferVideo) : undefined,
   );
+  // The element's own length belongs to one file. Left in place for the next
+  // one, the metadata effect re-clamped against it: the clock kept the
+  // previous song's length when the next never loaded (the stop after
+  // repeated failures), and a song/video switch could trip the metadata-end
+  // guard with the video's length. Reset in render, before those effects.
+  const loadKey = `${slot}:${streamVideoId}`;
+  const loadKeyRef = useRef(loadKey);
+  if (loadKeyRef.current !== loadKey) {
+    loadKeyRef.current = loadKey;
+    rawElDurationRef.current = 0;
+  }
 
   // The stream's own length when it isn't the queue row's file.
   //
@@ -755,7 +776,15 @@ export function useAudioEngine() {
     metaReferenceRef.current = metaReference;
   }, [metaReference]);
   useEffect(() => {
-    if (!metaReference || !rawElDurationRef.current) return;
+    if (!metaReference) return;
+    if (!rawElDurationRef.current) {
+      // Nothing loaded yet (or never will, after a failure): the listed
+      // length is all there is.
+      if (!usePlaybackStore.getState().duration) {
+        usePlaybackStore.getState().setDuration(metaReference);
+      }
+      return;
+    }
     usePlaybackStore
       .getState()
       .setDuration(correctedDuration(metaReference, rawElDurationRef.current));
@@ -1532,7 +1561,13 @@ export function useAudioEngine() {
 
   // Volume / mute follow store.
   const volume = usePlaybackStore((s) => s.volume);
-  const loudnessGain = useLoudnessGain(streamVideoId);
+  const upNextId = usePlaybackStore((s) => s.queue[s.index + 1]?.videoId);
+  const nextStreamId = useTrackSourceStore((s) =>
+    upNextId
+      ? resolveStreamId(upNextId, s.byVideoId, s.preferVideo)
+      : undefined,
+  );
+  const loudnessGain = useLoudnessGain(streamVideoId, nextStreamId);
   const muted = usePlaybackStore((s) => s.muted);
   useEffect(() => {
     const el = audioRef.current;

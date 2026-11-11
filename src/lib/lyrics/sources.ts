@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { fetchLrclibLyrics } from "@/lib/lyrics/lrclib";
 import { fetchYtMusicLyrics } from "@/lib/lyrics/ytmusic";
-import { rejectSiteChrome } from "@/lib/lyrics/plausibility";
+import { markOffTitle, rejectSiteChrome } from "@/lib/lyrics/plausibility";
 import { useLyricsSkip } from "@/lib/lyrics/skip";
 import {
   describeLyricsError,
@@ -19,8 +19,8 @@ export type LyricsSource = "ytmusic" | "lrclib";
 
 /**
  * YouTube Music leads because it is the only source keyed on the videoId
- * rather than on a fuzzy title/artist string: it structurally cannot hand
- * back another song's words, and the words it has are line-synced.
+ * rather than on a fuzzy title/artist string, and most of what it has is
+ * line-synced. It can still be wrong (see `markOffTitle`).
  */
 export const SOURCE_ORDER: LyricsSource[] = ["ytmusic", "lrclib"];
 
@@ -99,15 +99,24 @@ function logAttempt(
 const NONE_SKIPPED: LyricsSource[] = [];
 
 /** The auto pick: timed beats plain, then `SOURCE_ORDER`, passing over
- *  the sources the listener skipped for this track. */
+ *  the sources the listener skipped for this track. Plain text that may be
+ *  another song's comes last, and only once every other source has
+ *  answered, so it never shows while LRCLIB is still looking. */
 export function pickBest(
   data: (s: LyricsSource) => Lyrics | null | undefined,
   skipped: LyricsSource[],
+  answered: (s: LyricsSource) => boolean = () => true,
 ): LyricsSource | null {
   const open = SOURCE_ORDER.filter((s) => !skipped.includes(s));
   return (
     open.find((s) => data(s)?.kind === "timed") ??
-    open.find((s) => data(s)?.kind === "plain") ??
+    open.find((s) => {
+      const d = data(s);
+      return d?.kind === "plain" && !d.offTitle;
+    }) ??
+    (open.every(answered)
+      ? open.find((s) => data(s)?.kind === "plain")
+      : undefined) ??
     null
   );
 }
@@ -157,17 +166,23 @@ export function useLyricsSources(
   const askYtMusic = !!track?.videoId && enabled;
   const askByText = !!track && enabled && verifiable;
 
-  // Keyed on the videoId alone. No title, no artist, nothing to normalise.
+  // Looked up by the videoId alone; the title only checks plain text that
+  // shares none of its words (maybe another song's lyrics on the video).
   const ytmusic = useQuery({
     // v2: results now pass the site-chrome gate (plausibility.ts); orphan
     // v1 entries that hydrate from the persisted cache without running it.
-    queryKey: ["lyrics", "ytmusic-v2", track?.videoId],
+    // v3: plain text with none of the title's words is rejected; orphan v2
+    // entries that cached another song's lyrics.
+    // v4: it's marked and demoted instead; orphan v3 entries cached as none.
+    queryKey: ["lyrics", "ytmusic-v4", track?.videoId, title],
     queryFn: () =>
       logAttempt("ytmusic", () =>
         fetchYtMusicLyrics(
           track!.videoId,
           lyricsTimeoutSignal(PROVIDER_TIMEOUT_MS),
-        ).then(rejectSiteChrome("YouTube Music")),
+        )
+          .then(rejectSiteChrome("YouTube Music"))
+          .then(markOffTitle("YouTube Music", title)),
       ),
     enabled: askYtMusic,
     staleTime: ONE_HOUR,
@@ -228,23 +243,25 @@ export function useLyricsSources(
   const skipped = useLyricsSkip((s) =>
     track ? s.byVideo[track.videoId] : undefined,
   );
-  const best = pickBest(
-    (s) => queries[s].data,
-    skipped ?? NONE_SKIPPED,
-  );
-
-  const isLoading = SOURCE_ORDER.some((s) => queries[s].isLoading);
-  // Every source has answered, one way or the other. Not `!isFetching`: a
+  // A source has answered, one way or the other. Not `!isFetching`: a
   // query that is disabled, paused offline or still restoring from the
   // persisted cache is pending with nothing in flight, and counting that as
   // an answer reports "no source had it" before anyone has spoken.
-  const settled = SOURCE_ORDER.every((s) => {
+  const answered = (s: LyricsSource) =>
     // A provider that was never enabled is not going to answer. Waiting
     // on one means the "nothing found" line never appears at all, which
     // is the state a track with no artist string sits in.
-    if (!(s === "ytmusic" ? askYtMusic : askByText)) return true;
-    return queries[s].isSuccess || queries[s].isError;
-  });
+    !(s === "ytmusic" ? askYtMusic : askByText) ||
+    queries[s].isSuccess ||
+    queries[s].isError;
+  const best = pickBest(
+    (s) => queries[s].data,
+    skipped ?? NONE_SKIPPED,
+    answered,
+  );
+
+  const isLoading = SOURCE_ORDER.some((s) => queries[s].isLoading);
+  const settled = SOURCE_ORDER.every(answered);
 
   return { queries, best, isLoading, settled };
 }

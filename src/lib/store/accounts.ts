@@ -201,6 +201,8 @@ export function useAccountsChangedListener(): void {
       //    playing while everything else churns. `clearQueue` sets
       //    index = -1 which strips the audio element's src.
       usePlaybackStore.getState().clearQueue();
+      // Not something to Undo: the old account's queue stays gone.
+      usePlaybackStore.setState({ cleared: undefined });
 
       // 3. Other per-account local state: typed search history,
       //    per-track Song↔Video preferences, cached Premium status.

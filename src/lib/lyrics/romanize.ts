@@ -93,9 +93,10 @@ const GURMUKHI = (() => {
 const TAMIL: Script = {
   consonants: {
     // The five stops are placeholders: one letter covers both sounds, and
-    // tamilVoicing picks from the neighbours.
+    // tamilVoicing picks from the neighbours. ள is L until then, so the
+    // -gal plural can be told from a ல.
     க: "K", ங: "ng", ச: "C", ஞ: "nj", ட: "T", ண: "n", த: "TH", ந: "n",
-    ப: "P", ம: "m", ய: "y", ர: "r", ல: "l", வ: "v", ழ: "zh", ள: "l",
+    ப: "P", ம: "m", ய: "y", ர: "r", ல: "l", வ: "v", ழ: "zh", ள: "L",
     ற: "R", ன: "n", ஜ: "j", ஷ: "sh", ஶ: "sh", ஸ: "s", ஹ: "h",
   },
   vowels: {
@@ -224,6 +225,19 @@ function deleteSchwas(a: Akshara[]): void {
   }
 }
 
+/** Words the voicing rules can't know: Sanskrit loans (deepam, not theebam),
+ *  English (doctor, not taaktar) and the few words voiced after ழ் or ர்
+ *  outside the -gal plural (vaazhga, maargazhi). Whole words only. */
+const TAMIL_WORDS: Record<string, string> = {
+  மோகன்லால்: "mohanlal",
+  தீபம்: "deepam",
+  பக்தி: "bakthi",
+  டாக்டர்: "doctor",
+  பஸ்: "bus",
+  வாழ்க: "vaazhga",
+  மார்கழி: "maargazhi",
+};
+
 const TAMIL_STOPS: Record<string, [unvoiced: string, voiced: string]> = {
   K: ["k", "g"],
   C: ["s", "j"],
@@ -235,8 +249,9 @@ const TAMIL_STOPS: Record<string, [unvoiced: string, voiced: string]> = {
 /** Tamil's stops are written once and said two ways: unvoiced at the start
  *  of a word, after another consonant, doubled or with no vowel of their own
  *  (kandu's k, akka, pattu, lakshmi), voiced after a nasal (anbe, kandu's d,
- *  pandhu, nenjam) and between vowels (magan, paadal). ச is j after ஞ, ch
- *  doubled or after ட் ற் (kaatchi), and s elsewhere (paasam, isai). ற் ற is
+ *  pandhu, nenjam), the plural -kal after ழ் or ர் (malargal) and between vowels
+ *  (magan, paadal). ச is j after ஞ, ch doubled (pachai, written once) or
+ *  after ட் ற் (kaatchi), and s elsewhere (paasam, isai). ற் ற is
  *  tr (kaatru, vetri) and ன் ற ndr (thendral). A word-final aa is typed short
  *  (akka, appa), except in a one-letter word (vaa). */
 function tamilVoicing(a: Akshara[]): void {
@@ -245,6 +260,10 @@ function tamilVoicing(a: Akshara[]): void {
     const prev = i > 0 ? a[i - 1] : undefined;
     const prevLatin = i > 0 ? latin[i - 1] : "";
     const cluster = !!prev && prev.vowel === "";
+    if (latin[i] === "L") {
+      x.consonant = "l";
+      return;
+    }
     if (latin[i] === "H") {
       // ஃப is f in loanwords (fan, coffee); otherwise h.
       x.consonant = latin[i + 1] === "P" ? "" : "h";
@@ -266,12 +285,24 @@ function tamilVoicing(a: Akshara[]): void {
       (cluster && prevLatin === latin[i]) ||
       (x.vowel === "" && latin[i + 1] === latin[i]);
     const afterNasal = cluster && /^(ng|nj|n|m)$/.test(prevLatin);
+    // Only the plural -gal (malargal, uyirgale). Anywhere else a க there is
+    // mostly a compound or a loan, typed with k (nerkonda, Kargil); vaazhga
+    // and maargazhi are on the word list.
+    const afterLiquid =
+      cluster &&
+      latin[i] === "K" &&
+      x.vowel === "a" &&
+      latin[i + 1] === "L" &&
+      /^(zh|r)$/.test(prevLatin);
     const betweenVowels =
       !!prev && !cluster && prev.vowel !== "" && x.vowel !== "";
-    const voiced = !doubled && (afterNasal || betweenVowels);
+    const voiced = !doubled && (afterNasal || afterLiquid || betweenVowels);
     if (latin[i] === "C") {
+      // A doubled ச is typed once (pachai, machaan), so the first goes.
       x.consonant =
-        doubled || (cluster && /^(T|R)$/.test(prevLatin))
+        x.vowel === "" && latin[i + 1] === "C"
+          ? ""
+          : doubled || (cluster && /^(T|R)$/.test(prevLatin))
           ? "ch"
           : cluster && prevLatin === "nj"
             ? "j"
@@ -296,6 +327,18 @@ function spell(a: Akshara[], s: Script): string {
     // meri, tu). Tamil keeps them.
     let vowel = x.vowel;
     const nasalEnd = end && x.nasal && s.schwaDeletion;
+    // A final ुँ is a common spelling of ूँ, said and typed long (hoon,
+    // karoon, chaloon). A one-letter word other than हुँ keeps the short u
+    // (तुँ tu, सुँ su).
+    const longU = a.length > 1 || x.consonant === "h";
+    if (nasalEnd && vowel === "u" && longU && s === DEVANAGARI) vowel = "oo";
+    // A long ee before a bare aa is typed iya (kaaliyan, gaddiyan).
+    const iya = (y?: Akshara) =>
+      s.schwaDeletion && !y?.consonant && y?.vowel === "aa";
+    const beforeIya = vowel === "ee" && iya(a[i + 1]);
+    const afterIya = a[i - 1]?.vowel === "ee" && iya(x);
+    if (beforeIya) vowel = "i";
+    if (afterIya) out += "y";
     // A bare e after a short vowel is said with a y glide (liye, gaye, huye);
     // after a long one it stays as written (jaae).
     const glide =
@@ -311,9 +354,14 @@ function spell(a: Akshara[], s: Script): string {
     }
     // A final long aa keeps its length when nasal (maa, haan, not man), and so
     // does an oo in Devanagari (hoon, yoon). Gurmukhi's nasal u is typed short
-    // (saanu).
+    // (saanu). A vowel letter standing alone is sung long (aa aa aa); one on
+    // a consonant is still typed short (ka, na, pa).
+    const alone = a.length === 1 && !x.consonant;
     const keepsLength =
-      nasalEnd && (vowel === "aa" || (vowel === "oo" && s === DEVANAGARI));
+      alone ||
+      (nasalEnd &&
+        ((vowel === "aa" && !afterIya) ||
+          (vowel === "oo" && s === DEVANAGARI)));
     if (end && s.schwaDeletion && !keepsLength) {
       vowel = { aa: "a", ee: "i", oo: "u" }[vowel] ?? vowel;
     }
@@ -341,6 +389,9 @@ export function romanize(text: string): string | null {
   const out = line.replace(SCRIPT_RUN, (word) => {
     found = true;
     const s = scriptOf(word);
+    const loan =
+      s === TAMIL && TAMIL_WORDS[word.replace(/[\u200C\u200D]/g, "")];
+    if (loan) return loan;
     const akshara = parse(word, s);
     if (s.schwaDeletion) deleteSchwas(akshara);
     if (s === TAMIL) tamilVoicing(akshara);
