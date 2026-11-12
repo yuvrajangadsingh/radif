@@ -62,6 +62,15 @@ import { appLog, mediaState } from "@/lib/app-log";
 // adopt it as a visible surface when the current stream is a video file.
 let mediaElSingleton: HTMLVideoElement | null = null;
 
+function makeMediaElement(): HTMLVideoElement {
+  const el = document.createElement("video");
+  el.preload = "auto";
+  el.playsInline = true;
+  // Note: do NOT set crossOrigin — googlevideo.com doesn't return CORS
+  // headers, and setting it makes the media fail to load in the webview.
+  return el;
+}
+
 // Play/pause storm breaker.
 //
 // 2026-09-04 12:53: the element played, paused within milliseconds, and
@@ -231,8 +240,28 @@ function timeInBuffered(b: TimeRanges, t: number): boolean {
   return false;
 }
 
+// An element that mustn't be heard before this time (performance.now()).
+// The output applies other players' volume changes late, in steps, and
+// jumps them to their current value when a new player becomes audible;
+// a new song heard during a skip's ramp-out cut the old songs dead at that
+// moment (QA round 31, n3). So the new master waits out the ramp.
+const notBefore = new WeakMap<HTMLMediaElement, number>();
+
 function playLocal(el: HTMLMediaElement | null | undefined): Promise<void> {
   if (!el || isCasting()) return Promise.resolve();
+  const wait = (notBefore.get(el) ?? 0) - performance.now();
+  if (wait > 0) {
+    const src = el.src;
+    return new Promise((resolve, reject) => {
+      window.setTimeout(() => {
+        // Paused meanwhile, or a newer load took the element: that path
+        // plays it when it should.
+        if (!usePlaybackStore.getState().playing || el.src !== src)
+          return resolve();
+        playLocal(el).then(resolve, reject);
+      }, wait);
+    });
+  }
   // Every play() and its outcome go to the app log. A play() that neither
   // resolves nor rejects is the desktop-switch stall's signature: the
   // promise settles only when WebKit actually starts playback.
@@ -322,6 +351,11 @@ export function useAudioEngine() {
   } | null>(null);
   // An element ramping to silence after a skip mid-fade; not reusable yet.
   const releasingRef = useRef<HTMLVideoElement | null>(null);
+  // Each wired element's unbind, so one dropped after a skip mid-blend can
+  // be let go.
+  const unbindRef = useRef(new Map<HTMLVideoElement, () => void>());
+  // Those dropped elements while they ramp out; they follow pause and mute.
+  const retiringRef = useRef(new Set<HTMLVideoElement>());
   // A playing out the last of a gapless head start under B, with its own
   // loudness gain; it follows the volume slider and a skip ramps it out.
   // A gapless join in progress: B rising under A until A's end (wall
@@ -362,23 +396,41 @@ export function useAudioEngine() {
       return;
     if (idle.getAttribute("src")) emptyElement(idle);
   };
-  /** Silence an outgoing element over SKIP_RAMP_MS rather than pausing it
-   *  at volume, which clicks. */
-  const rampOut = (tail: HTMLVideoElement) => {
-    releasingRef.current = tail;
-    const from = tail.volume;
+  /** Take an element's volume to 0 over SKIP_RAMP_MS, then keep it playing
+   *  at 0 for OUTPUT_DELAY_MS before `stop`: the output runs that far
+   *  behind, and a pause drops what's queued, so a ramp that ends in a
+   *  pause is never heard (QA round 29). */
+  const rampThenStop = (e: HTMLVideoElement, stop: () => void) => {
+    const from = e.volume;
     const t0 = performance.now();
+    const c0 = e.currentTime;
     const step = () => {
       const k = Math.min(1, (performance.now() - t0) / SKIP_RAMP_MS);
-      tail.volume = from * (1 - k);
+      e.volume = from * (1 - k);
       if (k < 1) {
         window.setTimeout(step, 15);
         return;
       }
-      emptyElement(tail);
-      if (releasingRef.current === tail) releasingRef.current = null;
+      window.setTimeout(() => {
+        // Its own clock, not the timer: if something paused it early, the
+        // clock stops short. What was heard is the capture's call.
+        appLog(
+          `[crossfade] ramp to 0 from volume ${from.toFixed(2)} over ${SKIP_RAMP_MS}ms, held at 0 until the stop at ${Math.round(performance.now() - t0)}ms: its clock moved ${Math.round((e.currentTime - c0) * 1000)}ms, paused ${e.paused}`,
+        );
+        stop();
+      }, OUTPUT_DELAY_MS);
     };
     step();
+  };
+  /** Silence an outgoing element rather than pausing it at volume, which
+   *  clicks. Something else (a pause) may release it first. */
+  const rampOut = (tail: HTMLVideoElement) => {
+    releasingRef.current = tail;
+    rampThenStop(tail, () => {
+      if (releasingRef.current !== tail) return;
+      releasingRef.current = null;
+      emptyElement(tail);
+    });
   };
   /** A jump during A's gapless play-out: ramp it out too. */
   const rampPlayOut = () => {
@@ -565,14 +617,7 @@ export function useAudioEngine() {
   // surface (getMediaElement above).
   useEffect(() => {
     if (audioRef.current) return;
-    const make = () => {
-      const el = document.createElement("video");
-      el.preload = "auto";
-      el.playsInline = true;
-      // Note: do NOT set crossOrigin — googlevideo.com doesn't return CORS
-      // headers, and setting it makes the media fail to load in the webview.
-      return el;
-    };
+    const make = makeMediaElement;
     const el = make();
     audioRef.current = el;
     mediaElSingleton = el;
@@ -581,7 +626,11 @@ export function useAudioEngine() {
     // the resolve effect). Unused while both settings are off.
     idleRef.current = make();
     return () => {
-      for (const e of [audioRef.current, idleRef.current]) {
+      for (const e of [
+        audioRef.current,
+        idleRef.current,
+        ...retiringRef.current,
+      ]) {
         if (!e) continue;
         e.pause();
         e.src = "";
@@ -597,10 +646,13 @@ export function useAudioEngine() {
   // only acts while its element is the master: the idle one loads the next
   // track silently, and after a handoff the outgoing one plays out a fade.
   useEffect(() => {
-    const unbind = [audioRef.current, idleRef.current].map((el) =>
-      el ? bindElement(el) : () => {},
-    );
-    return () => unbind.forEach((u) => u());
+    const unbind = unbindRef.current;
+    for (const el of [audioRef.current, idleRef.current])
+      if (el) unbind.set(el, bindElement(el));
+    return () => {
+      unbind.forEach((u) => u());
+      unbind.clear();
+    };
   }, []);
   const bindElement = (el: HTMLVideoElement) => {
     const store = usePlaybackStore.getState;
@@ -1071,7 +1123,7 @@ export function useAudioEngine() {
   }, [videoId, trackKind, huntTitle]);
 
   useEffect(() => {
-    const el = audioRef.current;
+    let el = audioRef.current;
     if (!el) return;
     // Same logical track re-resolving (source flip / retry)? Grab the
     // playhead before anything below can destroy it. A premium-state
@@ -1244,6 +1296,34 @@ export function useAudioEngine() {
       );
       if (st.playing) playOrRecover(idle, token);
       return;
+    }
+    // A skip mid-blend: the incoming song can't be paused at once (that
+    // drops its queued audio, so both songs stopped dead, QA round 29), and
+    // its element is needed for the new song. Hand the master role to a
+    // fresh element; the old one ramps out with its events ignored, and
+    // the outgoing song ramps out as on any cut.
+    if (fadeRef.current && !sameSlot && !el.paused) {
+      const old = el;
+      const fresh = makeMediaElement();
+      unbindRef.current.set(fresh, bindElement(fresh));
+      // Heard no earlier than 250 + 264 ms (its fastest start-up, QA round
+      // 30), after the ramp's heard end (about 400 ms, round 31).
+      // A video track's picture starts on its own hold; no wait there.
+      if (!wantVideo)
+        notBefore.set(fresh, performance.now() + SKIP_RAMP_MS + 100);
+      fresh.muted = old.muted;
+      fresh.volume = masterVolume();
+      audioRef.current = fresh;
+      mediaElSingleton = fresh;
+      el = fresh;
+      retiringRef.current.add(old);
+      rampThenStop(old, () => {
+        retiringRef.current.delete(old);
+        emptyElement(old);
+        unbindRef.current.get(old)?.();
+        unbindRef.current.delete(old);
+        old.remove();
+      });
     }
     cutTail();
     if (!sameSlot) rampPlayOut();
@@ -1973,6 +2053,10 @@ export function useAudioEngine() {
         } else {
           j.el.volume = masterVolume() * k;
         }
+      }
+      for (const e of retiringRef.current) {
+        e.muted = s.muted;
+        if (!s.playing && !e.paused) e.pause();
       }
       const r = releasingRef.current;
       if (r) {
