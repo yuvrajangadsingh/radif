@@ -49,7 +49,7 @@ import {
 } from "@/lib/store/playlist-sort";
 
 export const Route = createFileRoute("/playlist/$id")({
-  component: PlaylistPageView,
+  component: PlaylistPage,
   validateSearch: (
     search: Record<string, unknown>,
   ): {
@@ -70,6 +70,13 @@ export const Route = createFileRoute("/playlist/$id")({
 });
 
 type AnyPage = PlaylistFirstPage | PlaylistNextPage;
+
+// Keyed by id: the router reuses the component when only $id changes, and
+// the search box, suggestions and in-flight shuffle belong to one playlist.
+function PlaylistPage() {
+  const { id } = Route.useParams();
+  return <PlaylistPageView key={id} />;
+}
 
 function PlaylistPageView() {
   const { id } = Route.useParams();
