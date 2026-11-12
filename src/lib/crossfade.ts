@@ -17,14 +17,25 @@ export const PREP_LEAD_S = 20;
 /**
  * Gapless: how long before the outgoing track's end the incoming one is
  * started, to cover the time it takes to start making sound. B's `playing`
- * event comes 13 to 33 ms after play(), but its sound comes much later:
- * round 27 recorded the app's output at 45 ms and found 397 to 485 ms of
- * silence at all 4 changes on Alive 2007, with A played to its file's end
- * and B from its start. The earlier rounds (90, 60, 45 ms) timed `playing`,
- * so they never saw it. 500 covers the measured start-up; the low end
- * would overlap by about 60 ms.
+ * event comes 13 to 33 ms after play(), its sound much later. Measured at
+ * the app's output on an M5: at 45 ms, 397 to 485 ms of silence (round 27);
+ * at 500 ms, 160 to 216 ms of overlap (round 28), so sound comes about 300 ms
+ * after play(). This is the first join's value; each join then corrects the
+ * next from when B's clock started, which round 28 found within 5 ms of the
+ * output (nextHeadStart).
  */
-export const GAPLESS_HEAD_START_MS = 500;
+export const GAPLESS_HEAD_START_MS = 310;
+/** What the correction aims for, in ms from A's end: a small overlap
+ *  rather than a gap. Negative is overlap. */
+export const GAPLESS_TARGET_MS = -15;
+
+/** The next join's head start, from this one's and when B's clock started
+ *  (ms from A's end, negative is overlap). Clamped, so one odd join (a
+ *  stall, a busy machine) can't swing it far. */
+export function nextHeadStart(headMs: number, startedMs: number): number {
+  const next = Math.round(headMs + startedMs - GAPLESS_TARGET_MS);
+  return Math.min(600, Math.max(150, next));
+}
 /** B ramps up from 0 over this long, so a small overlap can't click. */
 export const GAPLESS_RAMP_MS = 15;
 

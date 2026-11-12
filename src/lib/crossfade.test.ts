@@ -5,6 +5,7 @@ import {
   fadeLength,
   fadeNow,
   handoffBlocked,
+  nextHeadStart,
 } from "./crossfade";
 
 const base = {
@@ -155,5 +156,19 @@ describe("handoffBlocked", () => {
     expect(handoffBlocked({ ...ok, casting: true })).not.toBeNull();
     expect(handoffBlocked({ ...ok, video: true })).not.toBeNull();
     expect(handoffBlocked({ ...ok, sleepAfterTrack: true })).not.toBeNull();
+  });
+});
+
+describe("nextHeadStart", () => {
+  it("moves the next join to a small overlap, clamped", () => {
+    // Round 28: 500 ms overlapped by 205 ms.
+    expect(nextHeadStart(500, -205)).toBe(310);
+    // Round 27: 45 ms left a 450 ms gap.
+    expect(nextHeadStart(45, 450)).toBe(510);
+    // Already on target: unchanged.
+    expect(nextHeadStart(310, -15)).toBe(310);
+    // An odd join can't swing it past the clamp.
+    expect(nextHeadStart(310, 2000)).toBe(600);
+    expect(nextHeadStart(310, -900)).toBe(150);
   });
 });

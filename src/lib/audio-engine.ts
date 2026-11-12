@@ -18,6 +18,7 @@ import {
   fadeLength,
   fadeNow,
   GAPLESS_HEAD_START_MS,
+  nextHeadStart,
   GAPLESS_RAMP_MS,
   handoffBlocked,
   MIN_FADE_S,
@@ -323,6 +324,8 @@ export function useAudioEngine() {
   const releasingRef = useRef<HTMLVideoElement | null>(null);
   // A playing out the last of a gapless head start under B, with its own
   // loudness gain; it follows the volume slider and a skip ramps it out.
+  // The gapless head start, corrected after each join (nextHeadStart).
+  const headStartRef = useRef(GAPLESS_HEAD_START_MS);
   const playOutRef = useRef<{ el: HTMLVideoElement; gain: number } | null>(
     null,
   );
@@ -1165,12 +1168,13 @@ export function useAudioEngine() {
         // the handoff time plus what A had left (a head start lands
         // before the end, and so can the end of a long outro).
         const now = performance.now();
+        const handoffAt = now;
         const left = out.paused ? 0 : Math.max(0, handoff.end - out.currentTime);
         // Stopped already (its end, or the doubled-header guard's stop):
         // measure from when that happened.
         const stopped = out.paused && endedAtRef.current > 0;
         // More than a head start left means a skip (Next while armed).
-        const playsOut = left > 0 && left * 1000 <= GAPLESS_HEAD_START_MS + 100;
+        const playsOut = left > 0 && left * 1000 <= headStartRef.current + 100;
         const endAt = stopped
           ? endedAtRef.current
           : playsOut
@@ -1223,8 +1227,20 @@ export function useAudioEngine() {
               const now = performance.now();
               const moved = idle.currentTime > 0;
               if (moved || now - at > 2000) {
+                // Only an undisturbed join whose A end is known corrects the
+                // next one, by the lead it really got (none if A had ended).
+                // A pause or a seek before B's clock moved would skew it.
+                const head = Math.round(endAt - handoffAt);
+                if (
+                  moved &&
+                  (stopped || playsOut) &&
+                  idle.currentTime < 0.2 &&
+                  now - handoffAt < 1000 &&
+                  usePlaybackStore.getState().playing
+                )
+                  headStartRef.current = nextHeadStart(head, now - endAt);
                 appLog(
-                  `[gapless] ${moved ? `B's clock started ${Math.round(now - endAt)}ms` : "B's clock didn't start within 2 s"} from A's end (${endFrom}; negative is overlap); its playing event at ${Math.round(at - endAt)}ms, ${Math.round(at - lastUpdate)}ms from A's last timeupdate`,
+                  `[gapless] ${moved ? `B's clock started ${Math.round(now - endAt)}ms` : "B's clock didn't start within 2 s"} from A's end (${endFrom}; negative is overlap); its playing event at ${Math.round(at - endAt)}ms, ${Math.round(at - lastUpdate)}ms from A's last timeupdate; lead ${head}ms, next head start ${headStartRef.current}ms`,
                 );
                 return;
               }
@@ -2096,8 +2112,8 @@ export function useAudioEngine() {
         // render later, and this runs every 25 ms.
         if (
           !armed.fired &&
-          GAPLESS_HEAD_START_MS > 0 &&
-          pos >= end - GAPLESS_HEAD_START_MS / 1000
+          headStartRef.current > 0 &&
+          pos >= end - headStartRef.current / 1000
         ) {
           armed.fired = true;
           advanceAfterTrack();
