@@ -5777,6 +5777,24 @@ pub fn run() {
                     }
                     let _: () = msg_send![wk, _setWindowOcclusionDetectionEnabled: false];
                     eprintln!("[webkit] window occlusion detection disabled for the main window");
+                    // A page that is still hidden (Cmd+H, minimised, closed to the
+                    // menu bar) gets its timers clamped to about one a second by
+                    // WebKit's hidden-page timer throttling, a preference apart
+                    // from occlusion, backgroundThrottling and App Nap. The
+                    // crossfade sets volumes from a 25 ms timer, so a hidden fade
+                    // moved in 1 s steps (QA round 27). Private, so asked first.
+                    let config: *mut AnyObject = msg_send![wk, configuration];
+                    let prefs: *mut AnyObject = msg_send![config, preferences];
+                    let has: bool = msg_send![
+                        prefs,
+                        respondsToSelector: objc2::sel!(_setHiddenPageDOMTimerThrottlingEnabled:)
+                    ];
+                    if has {
+                        let _: () = msg_send![prefs, _setHiddenPageDOMTimerThrottlingEnabled: false];
+                        eprintln!("[webkit] hidden-page timer throttling disabled for the main window");
+                    } else {
+                        eprintln!("[webkit] no hidden-page timer throttling switch; left on");
+                    }
                 });
             }
             // Debug builds swap the taskbar/window icon to the orange
