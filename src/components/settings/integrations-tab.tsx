@@ -13,7 +13,11 @@ import { AudioLinesIcon, HistoryIcon, Loader2, Unplug } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { REJECTED, validateToken } from "@/lib/listenbrainz";
+import {
+  LISTENBRAINZ_SHIPPED,
+  REJECTED,
+  validateToken,
+} from "@/lib/listenbrainz";
 import { Group, SettingRow, TabPane } from "@/components/settings/primitives";
 import { useSettingsStore } from "@/lib/store/settings";
 import { DiscordIcon, LastfmIcon } from "@/components/shared/brand-icons";
@@ -439,7 +443,7 @@ export function IntegrationsTab() {
         />
       </Group>
       <LastfmSection />
-      <ListenbrainzSection />
+      {LISTENBRAINZ_SHIPPED && <ListenbrainzSection />}
     </TabPane>
   );
 }
