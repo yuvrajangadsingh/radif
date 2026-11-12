@@ -11,6 +11,11 @@ export const MIN_FADE_S = 0.5;
 /** How long a skip mid-fade takes to silence the outgoing element. Pausing
  *  it at volume clicks. */
 export const SKIP_RAMP_MS = 150;
+/** How far the app's audio output runs behind a volume change or a pause:
+ *  a pause is heard about 0.3 s later (QA rounds 27 and 29). A ramp that
+ *  ends in a pause is dropped with the queued audio, so an element keeps
+ *  playing at 0 this long before it's stopped. */
+export const OUTPUT_DELAY_MS = 300;
 /** How early the next track is loaded into the idle element. */
 export const PREP_LEAD_S = 20;
 
