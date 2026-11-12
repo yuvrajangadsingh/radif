@@ -18,8 +18,7 @@ import {
   fadeLength,
   fadeNow,
   GAPLESS_HEAD_START_MS,
-  nextHeadStart,
-  GAPLESS_RAMP_MS,
+  gaplessGain,
   handoffBlocked,
   MIN_FADE_S,
   PREP_LEAD_S,
@@ -339,8 +338,13 @@ export function useAudioEngine() {
   const retiringRef = useRef(new Set<HTMLVideoElement>());
   // A playing out the last of a gapless head start under B, with its own
   // loudness gain; it follows the volume slider and a skip ramps it out.
-  // The gapless head start, corrected after each join (nextHeadStart).
-  const headStartRef = useRef(GAPLESS_HEAD_START_MS);
+  // A gapless join in progress: B rising under A until A's end (wall
+  // clock, performance.now()), run from the crossfade tick.
+  const joinRef = useRef<{
+    el: HTMLVideoElement;
+    src: string;
+    endAt: number;
+  } | null>(null);
   const playOutRef = useRef<{ el: HTMLVideoElement; gain: number } | null>(
     null,
   );
@@ -1195,13 +1199,12 @@ export function useAudioEngine() {
         // the handoff time plus what A had left (a head start lands
         // before the end, and so can the end of a long outro).
         const now = performance.now();
-        const handoffAt = now;
         const left = out.paused ? 0 : Math.max(0, handoff.end - out.currentTime);
         // Stopped already (its end, or the doubled-header guard's stop):
         // measure from when that happened.
         const stopped = out.paused && endedAtRef.current > 0;
         // More than a head start left means a skip (Next while armed).
-        const playsOut = left > 0 && left * 1000 <= headStartRef.current + 100;
+        const playsOut = left > 0 && left * 1000 <= GAPLESS_HEAD_START_MS + 100;
         const endAt = stopped
           ? endedAtRef.current
           : playsOut
@@ -1235,12 +1238,14 @@ export function useAudioEngine() {
         if (playsOut) {
           playOutRef.current = { el: out, gain: handoff.gainOut };
           out.addEventListener("ended", finish, { once: true });
-          window.setTimeout(finish, left * 1000);
+          // Its natural end comes first; a stop would drop queued audio.
+          window.setTimeout(finish, left * 1000 + OUTPUT_DELAY_MS);
         } else {
           finish();
         }
         idle.volume = 0;
         rampingRef.current = true;
+        joinRef.current = { el: idle, src: startSrc, endAt };
         idle.addEventListener(
           "playing",
           () => {
@@ -1254,35 +1259,14 @@ export function useAudioEngine() {
               const now = performance.now();
               const moved = idle.currentTime > 0;
               if (moved || now - at > 2000) {
-                // Only an undisturbed join whose A end is known corrects the
-                // next one, by the lead it really got (none if A had ended).
-                // A pause or a seek before B's clock moved would skew it.
-                const head = Math.round(endAt - handoffAt);
-                if (
-                  moved &&
-                  (stopped || playsOut) &&
-                  idle.currentTime < 0.2 &&
-                  now - handoffAt < 1000 &&
-                  usePlaybackStore.getState().playing
-                )
-                  headStartRef.current = nextHeadStart(head, now - endAt);
                 appLog(
-                  `[gapless] ${moved ? `B's clock started ${Math.round(now - endAt)}ms` : "B's clock didn't start within 2 s"} from A's end (${endFrom}; negative is overlap); its playing event at ${Math.round(at - endAt)}ms, ${Math.round(at - lastUpdate)}ms from A's last timeupdate; lead ${head}ms, next head start ${headStartRef.current}ms`,
+                  `[gapless] ${moved ? `B's clock started ${Math.round(now - endAt)}ms` : "B's clock didn't start within 2 s"} from A's end (${endFrom}; negative is overlap); its playing event at ${Math.round(at - endAt)}ms, ${Math.round(at - lastUpdate)}ms from A's last timeupdate; B's gain then ${idle.volume.toFixed(2)}`,
                 );
                 return;
               }
               window.setTimeout(clock, 5);
             };
             clock();
-            // Up from 0 over GAPLESS_RAMP_MS, reading the slider as it goes.
-            const step = () => {
-              if (!rampingRef.current || audioRef.current !== idle) return;
-              const k = Math.min(1, (performance.now() - at) / GAPLESS_RAMP_MS);
-              idle.volume = masterVolume() * k;
-              if (k < 1) window.setTimeout(step, 4);
-              else rampingRef.current = false;
-            };
-            step();
           },
           { once: true },
         );
@@ -1321,6 +1305,7 @@ export function useAudioEngine() {
     // A skip during B's start ramp: whatever loads next plays at full.
     if (rampingRef.current) {
       rampingRef.current = false;
+      joinRef.current = null;
       el.volume = masterVolume();
     }
     // Stop the previous track immediately. Without this the old src keeps
@@ -2030,6 +2015,20 @@ export function useAudioEngine() {
 
       // An outgoing element still playing out (a gapless head start, or a
       // skip's 150 ms ramp) follows mute, and stops on a pause.
+      // A gapless join: B up its curve against A's end. A pause or a skip
+      // ends it at full.
+      const j = joinRef.current;
+      if (j) {
+        const live = audioRef.current === j.el && j.el.src === j.src;
+        const k = gaplessGain(j.endAt - performance.now());
+        if (!live || !s.playing || k >= 1) {
+          joinRef.current = null;
+          rampingRef.current = false;
+          if (live) j.el.volume = masterVolume();
+        } else {
+          j.el.volume = masterVolume() * k;
+        }
+      }
       for (const e of retiringRef.current) {
         e.muted = s.muted;
         if (!s.playing && !e.paused) e.pause();
@@ -2166,8 +2165,7 @@ export function useAudioEngine() {
         // render later, and this runs every 25 ms.
         if (
           !armed.fired &&
-          headStartRef.current > 0 &&
-          pos >= end - headStartRef.current / 1000
+          pos >= end - GAPLESS_HEAD_START_MS / 1000
         ) {
           armed.fired = true;
           advanceAfterTrack();
@@ -2210,6 +2208,13 @@ export function useAudioEngine() {
     return () => {
       window.clearInterval(timer);
       handoffRef.current = null;
+      // A join mid-rise would stay at its last gain with no tick to finish it.
+      const j = joinRef.current;
+      if (j) {
+        joinRef.current = null;
+        rampingRef.current = false;
+        if (audioRef.current === j.el) j.el.volume = masterVolume();
+      }
       cutTail();
       resetIdle();
     };
