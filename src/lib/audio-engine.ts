@@ -360,6 +360,7 @@ export function useAudioEngine() {
     releasingRef.current = tail;
     const from = tail.volume;
     const t0 = performance.now();
+    const c0 = tail.currentTime;
     const step = () => {
       const k = Math.min(1, (performance.now() - t0) / SKIP_RAMP_MS);
       tail.volume = from * (1 - k);
@@ -367,6 +368,11 @@ export function useAudioEngine() {
         window.setTimeout(step, 15);
         return;
       }
+      // Its own clock, not the timer: if something paused it early, the
+      // clock stops short of the ramp.
+      appLog(
+        `[crossfade] outgoing ramp ${Math.round(performance.now() - t0)}ms from volume ${from.toFixed(2)}: its clock moved ${Math.round((tail.currentTime - c0) * 1000)}ms, paused ${tail.paused}`,
+      );
       emptyElement(tail);
       if (releasingRef.current === tail) releasingRef.current = null;
     };
