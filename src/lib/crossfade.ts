@@ -16,12 +16,15 @@ export const PREP_LEAD_S = 20;
 
 /**
  * Gapless: how long before the outgoing track's end the incoming one is
- * started, to cover the time it takes to start making sound. QA's corrected
- * gaps (A's end to B's `playing`, negative is overlap): at 90 ms, -24 to -62
- * (round 18); at 60 ms, -1 to -29, median -12 (round 19d, Dark Side of the
- * Moon and Alive 2007). 45 aims at zero; listening decides from here.
+ * started, to cover the time it takes to start making sound. B's `playing`
+ * event comes 13 to 33 ms after play(), but its sound comes much later:
+ * round 27 recorded the app's output at 45 ms and found 397 to 485 ms of
+ * silence at all 4 changes on Alive 2007, with A played to its file's end
+ * and B from its start. The earlier rounds (90, 60, 45 ms) timed `playing`,
+ * so they never saw it. 500 covers the measured start-up; the low end
+ * would overlap by about 60 ms.
  */
-export const GAPLESS_HEAD_START_MS = 45;
+export const GAPLESS_HEAD_START_MS = 500;
 /** B ramps up from 0 over this long, so a small overlap can't click. */
 export const GAPLESS_RAMP_MS = 15;
 

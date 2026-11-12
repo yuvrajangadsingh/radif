@@ -1159,7 +1159,9 @@ export function useAudioEngine() {
           ? "A's stop"
           : playsOut
             ? "handoff + time left"
-            : "skip, A stopped at the handoff";
+            : left === 0
+              ? "A already at its end at the handoff"
+              : "skip, A stopped at the handoff";
         const startSrc = idle.src;
         const lastUpdate = lastTimeUpdateAtRef.current;
         endedAtRef.current = 0;
@@ -1189,9 +1191,20 @@ export function useAudioEngine() {
             // A skip may have loaded another track into this element.
             if (idle.src !== startSrc || audioRef.current !== idle) return;
             const at = performance.now();
-            appLog(
-              `[gapless] gap ${Math.round(at - endAt)}ms from A's end (${endFrom}; negative is overlap), ${Math.round(at - lastUpdate)}ms from A's last timeupdate`,
-            );
+            // `playing` fires long before B is heard, so time when its
+            // clock starts moving too. Still not the output: QA's capture is.
+            const clock = () => {
+              if (idle.src !== startSrc || audioRef.current !== idle) return;
+              const now = performance.now();
+              if (idle.currentTime > 0 || now - at > 2000) {
+                appLog(
+                  `[gapless] B's clock started ${Math.round(now - endAt)}ms from A's end (${endFrom}; negative is overlap); its playing event at ${Math.round(at - endAt)}ms, ${Math.round(at - lastUpdate)}ms from A's last timeupdate`,
+                );
+                return;
+              }
+              window.setTimeout(clock, 5);
+            };
+            clock();
             // Up from 0 over GAPLESS_RAMP_MS, reading the slider as it goes.
             const step = () => {
               if (!rampingRef.current || audioRef.current !== idle) return;
