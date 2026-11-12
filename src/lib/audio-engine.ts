@@ -251,12 +251,15 @@ function playLocal(el: HTMLMediaElement | null | undefined): Promise<void> {
   if (!el || isCasting()) return Promise.resolve();
   const wait = (notBefore.get(el) ?? 0) - performance.now();
   if (wait > 0) {
-    const src = el.src;
+    const deadline = notBefore.get(el);
     return new Promise((resolve, reject) => {
       window.setTimeout(() => {
-        // Paused meanwhile, or a newer load took the element: that path
-        // plays it when it should.
-        if (!usePlaybackStore.getState().playing || el.src !== src)
+        // Paused meanwhile, or a reload dropped the wait: that path plays
+        // it when it should (a video's start hold included).
+        if (
+          !usePlaybackStore.getState().playing ||
+          notBefore.get(el) !== deadline
+        )
           return resolve();
         playLocal(el).then(resolve, reject);
       }, wait);
@@ -402,9 +405,12 @@ export function useAudioEngine() {
    *  pause is never heard (QA round 29). */
   const rampThenStop = (e: HTMLVideoElement, stop: () => void) => {
     const from = e.volume;
+    const src = e.getAttribute("src");
     const t0 = performance.now();
     const c0 = e.currentTime;
     const step = () => {
+      // Emptied and reused meanwhile (a pause released it): leave it.
+      if (e.getAttribute("src") !== src) return;
       const k = Math.min(1, (performance.now() - t0) / SKIP_RAMP_MS);
       e.volume = from * (1 - k);
       if (k < 1) {
@@ -431,6 +437,14 @@ export function useAudioEngine() {
       releasingRef.current = null;
       emptyElement(tail);
     });
+  };
+  /** A gapless join cut short (a seek, the setting turned off): B at full. */
+  const endJoin = () => {
+    const j = joinRef.current;
+    if (!j) return;
+    joinRef.current = null;
+    rampingRef.current = false;
+    if (audioRef.current === j.el) j.el.volume = masterVolume();
   };
   /** A jump during A's gapless play-out: ramp it out too. */
   const rampPlayOut = () => {
@@ -1242,7 +1256,10 @@ export function useAudioEngine() {
         endedAtRef.current = 0;
         // A plays out what's left of a head start and stops at its end; on
         // a skip it stops now.
+        let finishTimer = 0;
         const finish = () => {
+          out.removeEventListener("ended", finish);
+          window.clearTimeout(finishTimer);
           if (releasingRef.current !== out) return;
           // A skip is ramping it out.
           if (playsOut && playOutRef.current?.el !== out) return;
@@ -1259,7 +1276,10 @@ export function useAudioEngine() {
           playOutRef.current = { el: out, gain: handoff.gainOut };
           out.addEventListener("ended", finish, { once: true });
           // Its natural end comes first; a stop would drop queued audio.
-          window.setTimeout(finish, left * 1000 + OUTPUT_DELAY_MS);
+          finishTimer = window.setTimeout(
+            finish,
+            left * 1000 + OUTPUT_DELAY_MS,
+          );
         } else {
           finish();
         }
@@ -1297,6 +1317,8 @@ export function useAudioEngine() {
       if (st.playing) playOrRecover(idle, token);
       return;
     }
+    // Any reload drops a wait an earlier skip set on this element.
+    notBefore.delete(el);
     // A skip mid-blend: the incoming song can't be paused at once (that
     // drops its queued audio, so both songs stopped dead, QA round 29), and
     // its element is needed for the new song. Hand the master role to a
@@ -2054,9 +2076,11 @@ export function useAudioEngine() {
           j.el.volume = masterVolume() * k;
         }
       }
+      // Casting takes the sound elsewhere; stop local copies too.
+      const silent = !s.playing || isCasting();
       for (const e of retiringRef.current) {
         e.muted = s.muted;
-        if (!s.playing && !e.paused) e.pause();
+        if (silent && !e.paused) e.pause();
       }
       const r = releasingRef.current;
       if (r) {
@@ -2066,7 +2090,7 @@ export function useAudioEngine() {
           const v = Math.max(0, Math.min(1, s.volume));
           r.volume = Math.min(1, v ** 3 * po.gain);
         }
-        if (!s.playing) {
+        if (silent) {
           releasingRef.current = null;
           playOutRef.current = null;
           emptyElement(r);
@@ -2185,6 +2209,8 @@ export function useAudioEngine() {
 
       const armed = handoffRef.current;
       if (armed) {
+        // A seek into an outro moves the end; the adoption reads this one.
+        armed.end = end;
         // Gapless armed: the head start advances, or else the end latch.
         // Once only: the store advancing reaches the resolve effect a
         // render later, and this runs every 25 ms.
@@ -2233,13 +2259,9 @@ export function useAudioEngine() {
     return () => {
       window.clearInterval(timer);
       handoffRef.current = null;
-      // A join mid-rise would stay at its last gain with no tick to finish it.
-      const j = joinRef.current;
-      if (j) {
-        joinRef.current = null;
-        rampingRef.current = false;
-        if (audioRef.current === j.el) j.el.volume = masterVolume();
-      }
+      // Nothing is left to finish a join or a play-out once the tick stops.
+      endJoin();
+      rampPlayOut();
       cutTail();
       resetIdle();
     };
@@ -2269,6 +2291,7 @@ export function useAudioEngine() {
     // ramps out and only this one plays on.
     cutTail();
     rampPlayOut();
+    endJoin();
     try {
       el.currentTime = pendingSeek;
     } catch {
