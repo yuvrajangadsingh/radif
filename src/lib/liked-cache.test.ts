@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
-import { invalidateLikedLists, markLibraryTracksStale } from "./liked-cache";
+import {
+  invalidateLikedLists,
+  markLibraryPlaylistsStale,
+  markLibraryTracksStale,
+} from "./liked-cache";
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
@@ -43,5 +47,25 @@ describe("markLibraryTracksStale", () => {
     await walk;
 
     expect(qc.getQueryData(["library-tracks"])).toBeUndefined();
+  });
+});
+
+describe("markLibraryPlaylistsStale", () => {
+  it("a first load still in flight can't land as fresh", async () => {
+    const qc = new QueryClient();
+    let release: (v: string[]) => void = () => {};
+    const load = qc
+      .fetchQuery({
+        queryKey: ["library", "playlists"],
+        queryFn: () => new Promise<string[]>((r) => (release = r)),
+      })
+      .catch(() => {});
+
+    markLibraryPlaylistsStale(qc);
+    await tick();
+    release(["old"]);
+    await load;
+
+    expect(qc.getQueryData(["library", "playlists"])).toBeUndefined();
   });
 });

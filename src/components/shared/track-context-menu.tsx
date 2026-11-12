@@ -73,6 +73,7 @@ import type { ShelfItem } from "@/lib/innertube/types";
 import { addCreatedPlaylist, dropPlaylistEntry } from "@/lib/playlist-cache";
 import {
   invalidateLikedLists,
+  markLibraryPlaylistsStale,
   markLibraryTracksStale,
 } from "@/lib/liked-cache";
 import { syncLastfmLove } from "@/lib/lastfm";
@@ -217,6 +218,7 @@ export function useTrackMenuController(item: ShelfItem) {
       // possibly VL-prefixed id), so ["playlist", p.id] never matched and
       // the invalidation was a no-op. Prefix-match every open playlist page.
       markLibraryTracksStale(qc);
+      markLibraryPlaylistsStale(qc);
       await qc.invalidateQueries({ queryKey: ["playlist-pages-v2"] });
       toast.success(`Added to ${p.title}`);
     } catch (e) {
@@ -236,6 +238,7 @@ export function useTrackMenuController(item: ShelfItem) {
         // that copy back, so YouTube's duplicate check has to be skipped.
         await addToPlaylist(removal.playlistId, item.id, { force: true });
         markLibraryTracksStale(qc);
+        markLibraryPlaylistsStale(qc);
         await qc.invalidateQueries({ queryKey: ["playlist-pages-v2"] });
         toast.success("Added back (at the end of the playlist)");
       } catch (e) {
@@ -247,6 +250,7 @@ export function useTrackMenuController(item: ShelfItem) {
       await dropPlaylistEntry(qc, removal.playlistId, setVideoId);
       // The Storage tab's in-library list is built from playlist membership.
       markLibraryTracksStale(qc);
+      markLibraryPlaylistsStale(qc);
       toast.success("Removed from playlist", {
         action: { label: "Undo", onClick: () => void undoRemove() },
       });
