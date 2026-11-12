@@ -55,6 +55,43 @@ export type WhatsNewEntry = {
  */
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    version: "0.9.0",
+    date: "November 13, 2026",
+    summary: "Shuffle that uses the whole playlist",
+    changes: [
+      {
+        type: "new",
+        title: "Shuffle plays the whole playlist",
+        text: "Shuffle now loads every song in the playlist and shuffles them on your Mac, so any song can come up first, not the same few YouTube Music's own shuffle tends to repeat. A big playlist takes a moment to load. If it won't load, YouTube Music's shuffle is used instead.",
+      },
+      {
+        type: "improved",
+        title: "A new icon",
+        text: "A music note that's also an r.",
+      },
+      {
+        type: "fixed",
+        title: "Search in playlist",
+        text: "The search box starts empty when you open another playlist, instead of carrying over and showing no songs.",
+      },
+      {
+        type: "fixed",
+        title: "Right-click menu",
+        text: "A quick right-click near the bottom of the window no longer picks a menu item by itself.",
+      },
+      {
+        type: "fixed",
+        title: "Playlists stay up to date",
+        text: "A new playlist shows in the sidebar, Library and Add to playlist right away, and Library's playlist cards update their song count after you add or remove a song.",
+      },
+      {
+        type: "fixed",
+        title: "Search filters",
+        text: "At the smallest window size, the Search page's filters no longer squeeze together.",
+      },
+    ],
+  },
+  {
     version: "0.8.0",
     date: "November 12, 2026",
     summary: "A steadier queue, playback and Latin lyrics",
