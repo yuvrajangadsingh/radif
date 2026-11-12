@@ -70,9 +70,10 @@ import {
 } from "@/lib/innertube/mutations";
 import { usePlaybackStore } from "@/lib/store/playback";
 import type { ShelfItem } from "@/lib/innertube/types";
-import { dropPlaylistEntry } from "@/lib/playlist-cache";
+import { addCreatedPlaylist, dropPlaylistEntry } from "@/lib/playlist-cache";
 import {
   invalidateLikedLists,
+  markLibraryPlaylistsStale,
   markLibraryTracksStale,
 } from "@/lib/liked-cache";
 import { syncLastfmLove } from "@/lib/lastfm";
@@ -217,6 +218,7 @@ export function useTrackMenuController(item: ShelfItem) {
       // possibly VL-prefixed id), so ["playlist", p.id] never matched and
       // the invalidation was a no-op. Prefix-match every open playlist page.
       markLibraryTracksStale(qc);
+      markLibraryPlaylistsStale(qc);
       await qc.invalidateQueries({ queryKey: ["playlist-pages-v2"] });
       toast.success(`Added to ${p.title}`);
     } catch (e) {
@@ -236,6 +238,7 @@ export function useTrackMenuController(item: ShelfItem) {
         // that copy back, so YouTube's duplicate check has to be skipped.
         await addToPlaylist(removal.playlistId, item.id, { force: true });
         markLibraryTracksStale(qc);
+        markLibraryPlaylistsStale(qc);
         await qc.invalidateQueries({ queryKey: ["playlist-pages-v2"] });
         toast.success("Added back (at the end of the playlist)");
       } catch (e) {
@@ -247,6 +250,7 @@ export function useTrackMenuController(item: ShelfItem) {
       await dropPlaylistEntry(qc, removal.playlistId, setVideoId);
       // The Storage tab's in-library list is built from playlist membership.
       markLibraryTracksStale(qc);
+      markLibraryPlaylistsStale(qc);
       toast.success("Removed from playlist", {
         action: { label: "Undo", onClick: () => void undoRemove() },
       });
@@ -255,8 +259,10 @@ export function useTrackMenuController(item: ShelfItem) {
     }
   };
 
+  // fetchQuery answers from the cache while it's fresh, so this fetches
+  // only on first open or once the list is stale or invalidated.
   const primeUserPlaylists = () => {
-    if (!playlists.data && !playlists.isFetching && !playlists.isError) {
+    if (!playlists.isFetching && !(playlists.isError && !playlists.data)) {
       void qc.fetchQuery({
         queryKey: ["user-playlists"],
         queryFn: () => fetchUserPlaylists(),
@@ -403,7 +409,7 @@ export function TrackMenuItems({
               <Loader2Icon className="size-3 animate-spin" />
               Loading…
             </div>
-          ) : playlists.isError ? (
+          ) : playlists.isError && !playlists.data ? (
             <div className="px-2 py-1.5 text-sm text-muted-foreground">
               Sign in to add to playlists.
             </div>
@@ -592,10 +598,9 @@ export function NewPlaylistDialog({
     if (!t || busy) return;
     setBusy(true);
     try {
-      await createPlaylistWithTrack(t, videoId);
+      const id = await createPlaylistWithTrack(t, videoId);
       markLibraryTracksStale(qc);
-      await qc.invalidateQueries({ queryKey: ["user-playlists"] });
-      await qc.invalidateQueries({ queryKey: ["library"] });
+      await addCreatedPlaylist(qc, id, t);
       toast.success(`Created "${t}"`);
       onOpenChange(false);
     } catch (e) {

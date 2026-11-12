@@ -128,7 +128,9 @@ function SearchPage() {
 
       <div className="flex flex-col gap-3">
         <SearchField filter={filter} urlQ={q} className="w-full" />
-        <div className="flex items-center gap-3">
+        {/* Wraps the toggle under the chips only when the chips would get
+            under 15rem, as at the minimum window width (#186). */}
+        <div className="flex flex-wrap items-center gap-3">
           {scope === "catalog" ? (
             <FilterBar filter={filter} />
           ) : (
@@ -278,7 +280,7 @@ function FilterBar({ filter }: { filter: SearchFilter }) {
   return (
     <div
       ref={scrollRef}
-      className="shelf-edge-fade min-w-0 flex-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      className="shelf-edge-fade min-w-[min(15rem,100%)] flex-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
     >
       <div className="flex w-max gap-1.5 py-0.5">
         {FILTERS.map((f) => (

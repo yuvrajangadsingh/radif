@@ -15,6 +15,19 @@ export function markLibraryTracksStale(qc: QueryClient): void {
 }
 
 /**
+ * The Library cards show each playlist's track count, so an add or a
+ * removal makes ["library", "playlists"] stale. A first load in flight
+ * would be reused by the refetch and land with the old count, so it's
+ * cancelled first, as above.
+ */
+export function markLibraryPlaylistsStale(qc: QueryClient): void {
+  const key = ["library", "playlists"];
+  void qc
+    .cancelQueries({ queryKey: key })
+    .then(() => qc.invalidateQueries({ queryKey: key }));
+}
+
+/**
  * A like, unlike or dislike changes more than the heart-fill cache
  * (["liked-songs"]): Library, Songs, its search, the Liked Songs playlist
  * page (LM or VLLM) and the Storage tab are built from the same list.

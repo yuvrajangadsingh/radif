@@ -1,5 +1,7 @@
 import type { QueryClient } from "@tanstack/react-query";
 import type { ShelfItem } from "@/lib/innertube/types";
+import type { LibrarySection } from "@/lib/innertube/library";
+import type { UserPlaylist } from "@/lib/innertube/mutations";
 
 type PlaylistPages = {
   pages: { tracks: ShelfItem[]; trackCount?: number }[];
@@ -52,4 +54,50 @@ export async function dropPlaylistEntry(
     // Keep a pending refresh pending.
     if (restart) void qc.invalidateQueries({ queryKey: key, exact: true });
   }
+}
+
+/**
+ * Puts a playlist just made in the app into the cached playlist lists (the
+ * sidebar, Library and the Add to playlist submenu). For a while after the
+ * create, YouTube's library browse can answer without it, so a refetch
+ * would come back without it too (#182). A list not loaded yet is left
+ * alone; it loads fresh when first shown. A fetch in flight is cancelled
+ * first, or its older answer would land over the write.
+ */
+export async function addCreatedPlaylist(
+  qc: QueryClient,
+  playlistId: string,
+  title: string,
+) {
+  const lists = [["user-playlists"], ["library", "playlists"]];
+  for (const key of lists) {
+    await qc.cancelQueries({ queryKey: key, exact: true });
+    // A first load cancelled here has nothing to write into; ask again.
+    if (!qc.getQueryData(key))
+      void qc.invalidateQueries({ queryKey: key, exact: true });
+  }
+  qc.setQueryData<UserPlaylist[]>(["user-playlists"], (old) =>
+    !old || old.some((p) => p.id === playlistId)
+      ? old
+      : [{ id: playlistId, title }, ...old],
+  );
+  const cardId = `VL${playlistId}`;
+  qc.setQueryData<LibrarySection[]>(["library", "playlists"], (old) => {
+    if (!old || old.some((s) => s.items.some((it) => it.id === cardId)))
+      return old;
+    const card: ShelfItem = {
+      kind: "playlist",
+      id: cardId,
+      title,
+      thumbnails: [],
+    };
+    const [
+      first = { id: "Playlists-0", title: "Playlists", items: [] },
+      ...rest
+    ] = old;
+    // Liked Music leads the shelf; the new playlist goes right after it.
+    const at = first.items[0]?.id === "VLLM" ? 1 : 0;
+    const items = [...first.items.slice(0, at), card, ...first.items.slice(at)];
+    return [{ ...first, items }, ...rest];
+  });
 }

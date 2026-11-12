@@ -22,6 +22,7 @@ import {
   type PlaylistSuggestions,
 } from "@/lib/innertube/playlist";
 import { fetchShuffleQueue } from "@/lib/innertube/radio";
+import { loadEveryPage } from "@/lib/load-every-page";
 import type { ShelfItem } from "@/lib/innertube/types";
 import { EntityHeader } from "@/components/shared/entity-header";
 import { ExpandableText } from "@/components/shared/expandable-text";
@@ -37,7 +38,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { usePlaybackStore } from "@/lib/store/playback";
+import { noPickSince, usePlaybackStore } from "@/lib/store/playback";
 import {
   useIsPinned,
   usePinnedPlaylistsStore,
@@ -48,7 +49,7 @@ import {
 } from "@/lib/store/playlist-sort";
 
 export const Route = createFileRoute("/playlist/$id")({
-  component: PlaylistPageView,
+  component: PlaylistPage,
   validateSearch: (
     search: Record<string, unknown>,
   ): {
@@ -69,6 +70,13 @@ export const Route = createFileRoute("/playlist/$id")({
 });
 
 type AnyPage = PlaylistFirstPage | PlaylistNextPage;
+
+// Keyed by id: the router reuses the component when only $id changes, and
+// the search box, suggestions and in-flight shuffle belong to one playlist.
+function PlaylistPage() {
+  const { id } = Route.useParams();
+  return <PlaylistPageView key={id} />;
+}
 
 function PlaylistPageView() {
   const { id } = Route.useParams();
@@ -165,6 +173,18 @@ function PlaylistPageView() {
   // fires ~a screen early so the next page is usually in hand by the
   // time the user actually reaches the end of the current batch.
   const sentinelRef = useRef<HTMLDivElement>(null);
+  // One Shuffle at a time per playlist: loading a big one takes a while.
+  // Holds the op that is loading, so leaving the playlist frees it.
+  const shufflingRef = useRef(-1);
+  // Bumped when this playlist goes away, so a Shuffle still loading for it
+  // doesn't play it (or the next playlist's pages) afterwards.
+  const opRef = useRef(0);
+  useEffect(
+    () => () => {
+      opRef.current++;
+    },
+    [id],
+  );
   useEffect(() => {
     const el = sentinelRef.current;
     if (!el) return;
@@ -246,28 +266,64 @@ function PlaylistPageView() {
       }
       return;
     }
-    // Prefer YTM's server-side shuffle: one /next call returns a fresh
-    // permutation over the ENTIRE playlist (not just the pages scrolled
-    // into view so far), and the rest of the permutation streams in via
-    // queueContinuation as playback nears the tail.
-    if (header.shuffle) {
+    // A true shuffle: load every page, as the filter does, then shuffle the
+    // whole playlist here, every song equally likely anywhere. YouTube
+    // Music's own shuffle is the one people say keeps playing the same small
+    // set, so it's only the fallback for when the pages won't load.
+    // Leaving this playlist (or the page) while it loads drops the shuffle.
+    const op = opRef.current;
+    if (shufflingRef.current === op) return;
+    shufflingRef.current = op;
+    // A song picked, or the queue changed by hand, while it loads wins.
+    const noPick = noPickSince();
+    const stale = () => opRef.current !== op || !noPick();
+    let loaded = tracks;
+    const toastId = query.hasNextPage
+      ? toast.loading("Loading the whole playlist to shuffle")
+      : undefined;
+    try {
       try {
-        const page = await fetchShuffleQueue(
-          header.shuffle.playlistId,
-          header.shuffle.params,
-        );
-        if (page.tracks.length > 0) {
-          store.playShelfItems(page.tracks, 0);
-          store.setShuffle(true);
-          store.setQueueContinuation(page.continuationToken);
+        await loadEveryPage({ hasNextPage: !!query.hasNextPage }, async () => {
+          if (stale()) throw new Error("left the playlist");
+          const step = await query.fetchNextPage({ cancelRefetch: false });
+          if (!stale() && step.data) {
+            loaded = step.data.pages.flatMap((p) => p.tracks);
+          }
+          return step;
+        });
+        if (stale()) return;
+        if (loaded.length > 0) {
+          store.shufflePlayShelfItems(loaded);
           return;
         }
       } catch {
-        // Fall through to the client-side shuffle over loaded tracks.
+        if (stale()) return;
+        // Fall back to YouTube Music's shuffle below.
       }
-    }
-    if (tracks.length > 0) {
-      store.shufflePlayShelfItems(tracks);
+      // Fallback: YTM's server-side shuffle, one /next call over the whole
+      // playlist, the rest streaming in via queueContinuation.
+      if (header.shuffle) {
+        try {
+          const page = await fetchShuffleQueue(
+            header.shuffle.playlistId,
+            header.shuffle.params,
+          );
+          if (stale()) return;
+          if (page.tracks.length > 0) {
+            store.playShelfItems(page.tracks, 0);
+            store.setShuffle(true);
+            store.setQueueContinuation(page.continuationToken);
+            return;
+          }
+        } catch {
+          // Fall through to the pages that did load.
+        }
+      }
+      if (!stale() && loaded.length > 0) store.shufflePlayShelfItems(loaded);
+    } finally {
+      if (toastId !== undefined) toast.dismiss(toastId);
+      // A newer Shuffle may own the lock now.
+      if (shufflingRef.current === op) shufflingRef.current = -1;
     }
   };
 
