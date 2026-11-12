@@ -1912,12 +1912,18 @@ export function useAudioEngine() {
       // maybeStartHeld() acts on it at release. Playing now would leak
       // audio ahead of the frames.
       if (videoHoldRef.current) return;
+      // Mid-blend, the outgoing song resumes in the same call. Left to the
+      // crossfade tick it came back about 80 ms after the incoming one
+      // (QA round 33).
+      const tail = fadeRef.current?.tail;
+      if (tail?.paused) void playLocal(tail).catch(() => {});
       void playLocal(el).catch((e) => {
         if (e?.name === "AbortError") return;
         usePlaybackStore.getState().setStatus("error", e?.message ?? String(e));
       });
     } else {
       el.pause();
+      fadeRef.current?.tail.pause();
     }
   }, [playing, premiumOk, casting]);
 
