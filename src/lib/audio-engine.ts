@@ -240,8 +240,28 @@ function timeInBuffered(b: TimeRanges, t: number): boolean {
   return false;
 }
 
+// An element that mustn't be heard before this time (performance.now()).
+// The output applies other players' volume changes late, in steps, and
+// jumps them to their current value when a new player becomes audible;
+// a new song heard during a skip's ramp-out cut the old songs dead at that
+// moment (QA round 31, n3). So the new master waits out the ramp.
+const notBefore = new WeakMap<HTMLMediaElement, number>();
+
 function playLocal(el: HTMLMediaElement | null | undefined): Promise<void> {
   if (!el || isCasting()) return Promise.resolve();
+  const wait = (notBefore.get(el) ?? 0) - performance.now();
+  if (wait > 0) {
+    const src = el.src;
+    return new Promise((resolve, reject) => {
+      window.setTimeout(() => {
+        // Paused meanwhile, or a newer load took the element: that path
+        // plays it when it should.
+        if (!usePlaybackStore.getState().playing || el.src !== src)
+          return resolve();
+        playLocal(el).then(resolve, reject);
+      }, wait);
+    });
+  }
   // Every play() and its outcome go to the app log. A play() that neither
   // resolves nor rejects is the desktop-switch stall's signature: the
   // promise settles only when WebKit actually starts playback.
@@ -1286,6 +1306,11 @@ export function useAudioEngine() {
       const old = el;
       const fresh = makeMediaElement();
       unbindRef.current.set(fresh, bindElement(fresh));
+      // Heard no earlier than 250 + 264 ms (its fastest start-up, QA round
+      // 30), after the ramp's heard end (about 400 ms, round 31).
+      // A video track's picture starts on its own hold; no wait there.
+      if (!wantVideo)
+        notBefore.set(fresh, performance.now() + SKIP_RAMP_MS + 100);
       fresh.muted = old.muted;
       fresh.volume = masterVolume();
       audioRef.current = fresh;
