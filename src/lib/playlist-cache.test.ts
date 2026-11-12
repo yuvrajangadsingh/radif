@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { InfiniteQueryObserver, QueryClient } from "@tanstack/react-query";
-import { dropPlaylistEntry } from "./playlist-cache";
+import { addCreatedPlaylist, dropPlaylistEntry } from "./playlist-cache";
 
 const row = (id: string, setVideoId: string) => ({ id, setVideoId }) as never;
 type Pages = {
@@ -144,5 +144,64 @@ describe("dropPlaylistEntry", () => {
       ["s2"],
     );
     unsub();
+  });
+});
+
+describe("addCreatedPlaylist", () => {
+  it("shows a new playlist in the loaded lists and leaves unloaded ones", async () => {
+    const qc = new QueryClient();
+    qc.setQueryData(["user-playlists"], [{ id: "PLold", title: "old" }]);
+    qc.setQueryData(
+      ["library", "playlists"],
+      [{ id: "s", title: "s", items: [{ id: "VLLM" }, { id: "VLPLold" }] }],
+    );
+    await addCreatedPlaylist(qc, "PLnew", "new");
+    // A second write (YouTube already had it) doesn't add it twice.
+    await addCreatedPlaylist(qc, "PLnew", "new");
+    expect(
+      qc.getQueryData<{ id: string }[]>(["user-playlists"])!.map((p) => p.id),
+    ).toEqual(["PLnew", "PLold"]);
+    expect(
+      qc
+        .getQueryData<{ items: { id: string }[] }[]>([
+          "library",
+          "playlists",
+        ])![0]
+        .items.map((i) => i.id),
+    ).toEqual(["VLLM", "VLPLnew", "VLPLold"]);
+
+    const fresh = new QueryClient();
+    await addCreatedPlaylist(fresh, "PLnew", "new");
+    expect(fresh.getQueryData(["user-playlists"])).toBeUndefined();
+    expect(fresh.getQueryData(["library", "playlists"])).toBeUndefined();
+  });
+
+  it("adds the first playlist to an empty library", async () => {
+    const qc = new QueryClient();
+    qc.setQueryData(["library", "playlists"], []);
+    await addCreatedPlaylist(qc, "PLnew", "new");
+    expect(
+      qc
+        .getQueryData<{ items: { id: string }[] }[]>([
+          "library",
+          "playlists",
+        ])![0]
+        .items.map((i) => i.id),
+    ).toEqual(["VLPLnew"]);
+  });
+
+  it("a first load in flight can't land without the new playlist", async () => {
+    const qc = new QueryClient();
+    let release: (v: unknown[]) => void = () => {};
+    const load = qc
+      .fetchQuery({
+        queryKey: ["user-playlists"],
+        queryFn: () => new Promise<unknown[]>((r) => (release = r)),
+      })
+      .catch(() => {});
+    await addCreatedPlaylist(qc, "PLnew", "new");
+    release([{ id: "PLold", title: "old" }]);
+    await load;
+    expect(qc.getQueryData(["user-playlists"])).toBeUndefined();
   });
 });
