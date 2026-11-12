@@ -321,6 +321,11 @@ export function useAudioEngine() {
   } | null>(null);
   // An element ramping to silence after a skip mid-fade; not reusable yet.
   const releasingRef = useRef<HTMLVideoElement | null>(null);
+  // A playing out the last of a gapless head start under B, with its own
+  // loudness gain; it follows the volume slider and a skip ramps it out.
+  const playOutRef = useRef<{ el: HTMLVideoElement; gain: number } | null>(
+    null,
+  );
   const lastTimeUpdateAtRef = useRef(0);
   // When the master really ended (its `ended`, or a timeupdate that saw
   // it), for the gapless gap measurement. 0 until then.
@@ -349,13 +354,9 @@ export function useAudioEngine() {
       return;
     if (idle.getAttribute("src")) emptyElement(idle);
   };
-  /** A skip mid-fade: silence the outgoing element over SKIP_RAMP_MS rather
-   *  than pausing it at volume, which clicks. */
-  const cutTail = () => {
-    const f = fadeRef.current;
-    if (!f) return;
-    fadeRef.current = null;
-    const tail = f.tail;
+  /** Silence an outgoing element over SKIP_RAMP_MS rather than pausing it
+   *  at volume, which clicks. */
+  const rampOut = (tail: HTMLVideoElement) => {
     releasingRef.current = tail;
     const from = tail.volume;
     const t0 = performance.now();
@@ -370,6 +371,13 @@ export function useAudioEngine() {
       if (releasingRef.current === tail) releasingRef.current = null;
     };
     step();
+  };
+  /** A skip mid-fade. */
+  const cutTail = () => {
+    const f = fadeRef.current;
+    if (!f) return;
+    fadeRef.current = null;
+    rampOut(f.tail);
     // The incoming element was partway up; whatever plays now is at full.
     const el = audioRef.current;
     if (el) el.volume = masterVolume();
@@ -1169,6 +1177,9 @@ export function useAudioEngine() {
         // a skip it stops now.
         const finish = () => {
           if (releasingRef.current !== out) return;
+          // A skip is ramping it out.
+          if (playsOut && playOutRef.current?.el !== out) return;
+          playOutRef.current = null;
           releasingRef.current = null;
           emptyElement(out);
           // Only while B is still current; a skip's own load already
@@ -1178,6 +1189,7 @@ export function useAudioEngine() {
         };
         releasingRef.current = out;
         if (playsOut) {
+          playOutRef.current = { el: out, gain: handoff.gainOut };
           out.addEventListener("ended", finish, { once: true });
           window.setTimeout(finish, left * 1000);
         } else {
@@ -1196,9 +1208,10 @@ export function useAudioEngine() {
             const clock = () => {
               if (idle.src !== startSrc || audioRef.current !== idle) return;
               const now = performance.now();
-              if (idle.currentTime > 0 || now - at > 2000) {
+              const moved = idle.currentTime > 0;
+              if (moved || now - at > 2000) {
                 appLog(
-                  `[gapless] B's clock started ${Math.round(now - endAt)}ms from A's end (${endFrom}; negative is overlap); its playing event at ${Math.round(at - endAt)}ms, ${Math.round(at - lastUpdate)}ms from A's last timeupdate`,
+                  `[gapless] ${moved ? `B's clock started ${Math.round(now - endAt)}ms` : "B's clock didn't start within 2 s"} from A's end (${endFrom}; negative is overlap); its playing event at ${Math.round(at - endAt)}ms, ${Math.round(at - lastUpdate)}ms from A's last timeupdate`,
                 );
                 return;
               }
@@ -1225,6 +1238,12 @@ export function useAudioEngine() {
       return;
     }
     cutTail();
+    // A skip during A's gapless play-out.
+    const po = playOutRef.current;
+    if (po && !sameSlot) {
+      playOutRef.current = null;
+      if (releasingRef.current === po.el) rampOut(po.el);
+    }
     // A skip during B's start ramp: whatever loads next plays at full.
     if (rampingRef.current) {
       rampingRef.current = false;
@@ -1940,8 +1959,14 @@ export function useAudioEngine() {
       const r = releasingRef.current;
       if (r) {
         r.muted = s.muted;
+        const po = playOutRef.current;
+        if (po?.el === r) {
+          const v = Math.max(0, Math.min(1, s.volume));
+          r.volume = Math.min(1, v ** 3 * po.gain);
+        }
         if (!s.playing) {
           releasingRef.current = null;
+          playOutRef.current = null;
           emptyElement(r);
         }
       }
