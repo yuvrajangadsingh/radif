@@ -360,6 +360,7 @@ export function useAudioEngine() {
     releasingRef.current = tail;
     const from = tail.volume;
     const t0 = performance.now();
+    const c0 = tail.currentTime;
     const step = () => {
       const k = Math.min(1, (performance.now() - t0) / SKIP_RAMP_MS);
       tail.volume = from * (1 - k);
@@ -367,10 +368,22 @@ export function useAudioEngine() {
         window.setTimeout(step, 15);
         return;
       }
+      // Its own clock, not the timer: if something paused it early, the
+      // clock stops short of the ramp.
+      appLog(
+        `[crossfade] outgoing ramp ${Math.round(performance.now() - t0)}ms from volume ${from.toFixed(2)}: its clock moved ${Math.round((tail.currentTime - c0) * 1000)}ms, paused ${tail.paused}`,
+      );
       emptyElement(tail);
       if (releasingRef.current === tail) releasingRef.current = null;
     };
     step();
+  };
+  /** A jump during A's gapless play-out: ramp it out too. */
+  const rampPlayOut = () => {
+    const po = playOutRef.current;
+    if (!po) return;
+    playOutRef.current = null;
+    if (releasingRef.current === po.el) rampOut(po.el);
   };
   /** A skip mid-fade. */
   const cutTail = () => {
@@ -381,7 +394,7 @@ export function useAudioEngine() {
     // The incoming element was partway up; whatever plays now is at full.
     const el = audioRef.current;
     if (el) el.volume = masterVolume();
-    appLog("[crossfade] cut by a skip");
+    appLog("[crossfade] cut by a skip or seek");
   };
   /** Start a freshly loaded master, recovering from WebKit aborting the
    *  play() while the track is still current. */
@@ -1238,12 +1251,7 @@ export function useAudioEngine() {
       return;
     }
     cutTail();
-    // A skip during A's gapless play-out.
-    const po = playOutRef.current;
-    if (po && !sameSlot) {
-      playOutRef.current = null;
-      if (releasingRef.current === po.el) rampOut(po.el);
-    }
+    if (!sameSlot) rampPlayOut();
     // A skip during B's start ramp: whatever loads next plays at full.
     if (rampingRef.current) {
       rampingRef.current = false;
@@ -2157,6 +2165,10 @@ export function useAudioEngine() {
       usePlaybackStore.getState().clearPendingSeek();
       return;
     }
+    // Any jump ends a blend, Previous's rewind included: the outgoing song
+    // ramps out and only this one plays on.
+    cutTail();
+    rampPlayOut();
     try {
       el.currentTime = pendingSeek;
     } catch {
