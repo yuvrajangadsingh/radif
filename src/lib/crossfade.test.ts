@@ -5,6 +5,7 @@ import {
   fadeLength,
   fadeNow,
   handoffBlocked,
+  gaplessGain,
 } from "./crossfade";
 
 const base = {
@@ -155,5 +156,16 @@ describe("handoffBlocked", () => {
     expect(handoffBlocked({ ...ok, casting: true })).not.toBeNull();
     expect(handoffBlocked({ ...ok, video: true })).not.toBeNull();
     expect(handoffBlocked({ ...ok, sleepAfterTrack: true })).not.toBeNull();
+  });
+});
+
+describe("gaplessGain", () => {
+  it("is silent before the blend, full at A's end, equal power between", () => {
+    expect(gaplessGain(400)).toBe(0);
+    expect(gaplessGain(240)).toBe(0);
+    expect(gaplessGain(120)).toBeCloseTo(Math.SQRT1_2, 5);
+    expect(gaplessGain(0)).toBe(1);
+    // A late B, after A's end: full.
+    expect(gaplessGain(-50)).toBe(1);
   });
 });
