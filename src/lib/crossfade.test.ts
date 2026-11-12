@@ -5,7 +5,7 @@ import {
   fadeLength,
   fadeNow,
   handoffBlocked,
-  nextHeadStart,
+  gaplessGain,
 } from "./crossfade";
 
 const base = {
@@ -159,16 +159,13 @@ describe("handoffBlocked", () => {
   });
 });
 
-describe("nextHeadStart", () => {
-  it("moves the next join to a small overlap, clamped", () => {
-    // Round 28: 500 ms overlapped by 205 ms.
-    expect(nextHeadStart(500, -205)).toBe(310);
-    // Round 27: 45 ms left a 450 ms gap.
-    expect(nextHeadStart(45, 450)).toBe(510);
-    // Already on target: unchanged.
-    expect(nextHeadStart(310, -15)).toBe(310);
-    // An odd join can't swing it past the clamp.
-    expect(nextHeadStart(310, 2000)).toBe(600);
-    expect(nextHeadStart(310, -900)).toBe(150);
+describe("gaplessGain", () => {
+  it("is silent before the blend, full at A's end, equal power between", () => {
+    expect(gaplessGain(400)).toBe(0);
+    expect(gaplessGain(240)).toBe(0);
+    expect(gaplessGain(120)).toBeCloseTo(Math.SQRT1_2, 5);
+    expect(gaplessGain(0)).toBe(1);
+    // A late B, after A's end: full.
+    expect(gaplessGain(-50)).toBe(1);
   });
 });
