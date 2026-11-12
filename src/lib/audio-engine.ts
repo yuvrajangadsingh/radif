@@ -380,6 +380,13 @@ export function useAudioEngine() {
     };
     step();
   };
+  /** A jump during A's gapless play-out: ramp it out too. */
+  const rampPlayOut = () => {
+    const po = playOutRef.current;
+    if (!po) return;
+    playOutRef.current = null;
+    if (releasingRef.current === po.el) rampOut(po.el);
+  };
   /** A skip mid-fade. */
   const cutTail = () => {
     const f = fadeRef.current;
@@ -389,7 +396,7 @@ export function useAudioEngine() {
     // The incoming element was partway up; whatever plays now is at full.
     const el = audioRef.current;
     if (el) el.volume = masterVolume();
-    appLog("[crossfade] cut by a skip");
+    appLog("[crossfade] cut by a skip or seek");
   };
   /** Start a freshly loaded master, recovering from WebKit aborting the
    *  play() while the track is still current. */
@@ -1239,12 +1246,7 @@ export function useAudioEngine() {
       return;
     }
     cutTail();
-    // A skip during A's gapless play-out.
-    const po = playOutRef.current;
-    if (po && !sameSlot) {
-      playOutRef.current = null;
-      if (releasingRef.current === po.el) rampOut(po.el);
-    }
+    if (!sameSlot) rampPlayOut();
     // A skip during B's start ramp: whatever loads next plays at full.
     if (rampingRef.current) {
       rampingRef.current = false;
@@ -2179,6 +2181,10 @@ export function useAudioEngine() {
       usePlaybackStore.getState().clearPendingSeek();
       return;
     }
+    // Any jump ends a blend, Previous's rewind included: the outgoing song
+    // ramps out and only this one plays on.
+    cutTail();
+    rampPlayOut();
     try {
       el.currentTime = pendingSeek;
     } catch {
