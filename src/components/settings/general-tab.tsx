@@ -5,6 +5,7 @@ import { listen } from "@tauri-apps/api/event";
 import {
   AudioLinesIcon,
   BellIcon,
+  BlendIcon,
   Loader2Icon,
   LogInIcon,
   PanelTopIcon,
@@ -124,6 +125,9 @@ function BehaviorGroup() {
   const accounts = useAccounts().data;
   const signedIn = !accounts || accounts.some((a) => a.isActive);
   const setNormalizeVolume = useSettingsStore((s) => s.setNormalizeVolume);
+  // Listen build only: crossfade and gapless have no Settings rows yet.
+  const crossfadeSeconds = useSettingsStore((s) => s.crossfadeSeconds);
+  const gapless = useSettingsStore((s) => s.gapless);
   const notchSongPeek = useSettingsStore((s) => s.notchSongPeek);
   const setNotchSongPeek = useSettingsStore((s) => s.setNotchSongPeek);
 
@@ -187,6 +191,41 @@ function BehaviorGroup() {
             disabled={!signedIn}
             onCheckedChange={setNormalizeVolume}
             aria-label="Normalize volume"
+          />
+        }
+      />
+      <SettingRow
+        icon={BlendIcon}
+        title="Crossfade"
+        description="How long the end of one song overlaps the start of the next."
+        control={
+          <select
+            value={crossfadeSeconds}
+            onChange={(e) =>
+              useSettingsStore.setState({
+                crossfadeSeconds: Number(e.target.value),
+              })
+            }
+            aria-label="Crossfade"
+            className="rounded-md border border-input bg-transparent px-2 py-1 text-sm"
+          >
+            {[0, 2, 4, 6, 8, 12].map((n) => (
+              <option key={n} value={n}>
+                {n === 0 ? "Off" : `${n} s`}
+              </option>
+            ))}
+          </select>
+        }
+      />
+      <SettingRow
+        icon={AudioLinesIcon}
+        title="Gapless"
+        description="With crossfade off, the next song starts the moment this one ends."
+        control={
+          <Switch
+            checked={gapless}
+            onCheckedChange={(v) => useSettingsStore.setState({ gapless: v })}
+            aria-label="Gapless"
           />
         }
       />
