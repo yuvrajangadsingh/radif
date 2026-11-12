@@ -11,15 +11,35 @@ export const MIN_FADE_S = 0.5;
 /** How long a skip mid-fade takes to silence the outgoing element. Pausing
  *  it at volume clicks. */
 export const SKIP_RAMP_MS = 150;
+/** How far the app's audio output runs behind a volume change or a pause:
+ *  a pause is heard about 0.3 s later (QA rounds 27 and 29). A ramp that
+ *  ends in a pause is dropped with the queued audio, so an element keeps
+ *  playing at 0 this long before it's stopped. */
+export const OUTPUT_DELAY_MS = 300;
 /** How early the next track is loaded into the idle element. */
 export const PREP_LEAD_S = 20;
 
 /**
- * Gapless: how long before the outgoing track's end the incoming one starts.
- * 0 starts it from the end latch; tune it (0 to 50) from the `[gapless] gap`
- * lines in the app log.
+ * Gapless: how long before the outgoing track's end the incoming one is
+ * started. B's sound comes 264 to 444 ms after its play(), and it varies
+ * that much from one join to the next (QA round 30, from the output: head
+ * start plus the measured gap or overlap), so no head start can land a
+ * join exactly. Started 500 ms early, B is heard by 56 ms before A's end
+ * at the slowest measured start, so there's no gap. It comes up from
+ * silence under A over the last GAPLESS_BLEND_MS (gaplessGain), so a fast
+ * start overlaps A by up to 236 ms, blended rather than at full. A plays
+ * untouched to its end. Exact joins need Web Audio scheduling (backlog).
  */
-export const GAPLESS_HEAD_START_MS = 0;
+export const GAPLESS_HEAD_START_MS = 500;
+/** How long before A's end B rises from 0 to full: 500 - 264, so even the
+ *  fastest measured start is heard from (nearly) 0. */
+export const GAPLESS_BLEND_MS = 240;
+
+/** B's gain at `msToEnd` before A's end: 0 until the blend window, then
+ *  up the crossfade's equal-power curve to full at A's end. */
+export function gaplessGain(msToEnd: number): number {
+  return fadeGains(1 - msToEnd / GAPLESS_BLEND_MS).in;
+}
 
 /**
  * Where the current track actually stops: the earliest of the element's

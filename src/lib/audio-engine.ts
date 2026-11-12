@@ -18,10 +18,12 @@ import {
   fadeLength,
   fadeNow,
   GAPLESS_HEAD_START_MS,
+  gaplessGain,
   handoffBlocked,
   MIN_FADE_S,
   PREP_LEAD_S,
   SKIP_RAMP_MS,
+  OUTPUT_DELAY_MS,
 } from "@/lib/crossfade";
 import { followSlot, type PlayingSlot } from "@/lib/playing-slot";
 import { usePlaybackStore, type QueueTrack } from "@/lib/store/playback";
@@ -301,6 +303,8 @@ export function useAudioEngine() {
     fade: number;
     end: number;
     gainOut: number;
+    /** A gapless head start already advanced the store. */
+    fired?: boolean;
   } | null>(null);
   const fadeRef = useRef<{
     tail: HTMLVideoElement;
@@ -318,7 +322,24 @@ export function useAudioEngine() {
   } | null>(null);
   // An element ramping to silence after a skip mid-fade; not reusable yet.
   const releasingRef = useRef<HTMLVideoElement | null>(null);
+  // A playing out the last of a gapless head start under B, with its own
+  // loudness gain; it follows the volume slider and a skip ramps it out.
+  // A gapless join in progress: B rising under A until A's end (wall
+  // clock, performance.now()), run from the crossfade tick.
+  const joinRef = useRef<{
+    el: HTMLVideoElement;
+    src: string;
+    endAt: number;
+  } | null>(null);
+  const playOutRef = useRef<{ el: HTMLVideoElement; gain: number } | null>(
+    null,
+  );
   const lastTimeUpdateAtRef = useRef(0);
+  // When the master really ended (its `ended`, or a timeupdate that saw
+  // it), for the gapless gap measurement. 0 until then.
+  const endedAtRef = useRef(0);
+  // B's 15 ms start ramp is running; the volume effect leaves it alone.
+  const rampingRef = useRef(false);
   const loudnessGainRef = useRef(1);
   const masterVolume = () => {
     const v = Math.max(0, Math.min(1, usePlaybackStore.getState().volume));
@@ -341,13 +362,9 @@ export function useAudioEngine() {
       return;
     if (idle.getAttribute("src")) emptyElement(idle);
   };
-  /** A skip mid-fade: silence the outgoing element over SKIP_RAMP_MS rather
-   *  than pausing it at volume, which clicks. */
-  const cutTail = () => {
-    const f = fadeRef.current;
-    if (!f) return;
-    fadeRef.current = null;
-    const tail = f.tail;
+  /** Silence an outgoing element over SKIP_RAMP_MS rather than pausing it
+   *  at volume, which clicks. */
+  const rampOut = (tail: HTMLVideoElement) => {
     releasingRef.current = tail;
     const from = tail.volume;
     const t0 = performance.now();
@@ -362,6 +379,13 @@ export function useAudioEngine() {
       if (releasingRef.current === tail) releasingRef.current = null;
     };
     step();
+  };
+  /** A skip mid-fade. */
+  const cutTail = () => {
+    const f = fadeRef.current;
+    if (!f) return;
+    fadeRef.current = null;
+    rampOut(f.tail);
     // The incoming element was partway up; whatever plays now is at full.
     const el = audioRef.current;
     if (el) el.volume = masterVolume();
@@ -590,6 +614,8 @@ export function useAudioEngine() {
     const onEnded = trackEnd.onEnded;
     const onTimeUpdate = () => {
       lastTimeUpdateAtRef.current = performance.now();
+      if (el.ended && !endedAtRef.current)
+        endedAtRef.current = lastTimeUpdateAtRef.current;
       store().setPosition(el.currentTime);
       // End-guard for the double-length m4a header bug: correctedDuration
       // shows the LISTED length while the element claims ~2x (phantom
@@ -614,6 +640,7 @@ export function useAudioEngine() {
         !endGuardFiredRef.current
       ) {
         endGuardFiredRef.current = true;
+        if (!endedAtRef.current) endedAtRef.current = performance.now();
         // Rewind the element first: at the end of the queue (repeat off)
         // next() only stops — without this the element would sit parked
         // in the phantom zone and a later Play would resume silence.
@@ -759,6 +786,8 @@ export function useAudioEngine() {
       }
     };
     const onPlaying = () => {
+      // Playing again means it hasn't ended; an older end mark is stale.
+      endedAtRef.current = 0;
       consecutiveErrorsRef.current = 0;
       // Track played successfully — allow a fresh auto-retry if it later
       // fails again (e.g. a mid-stream drop on a much later replay).
@@ -808,7 +837,10 @@ export function useAudioEngine() {
     on(el, "timeupdate", onTimeUpdate);
     on(el, "durationchange", onDurationChange);
     on(el, "progress", onProgress);
-    on(el, "ended", onEnded);
+    on(el, "ended", () => {
+      if (!endedAtRef.current) endedAtRef.current = performance.now();
+      onEnded();
+    });
     on(el, "pause", onElPause);
     on(el, "play", onElPlay);
     on(el, "error", onError);
@@ -1124,16 +1156,79 @@ export function useAudioEngine() {
         };
         idle.volume = 0;
       } else {
-        emptyElement(out);
-        evictDegraded(streamVideoId);
-        idle.volume = masterVolume();
+        // Where A really ends: its own `ended` when that came first, else
+        // the handoff time plus what A had left (a head start lands
+        // before the end, and so can the end of a long outro).
+        const now = performance.now();
+        const left = out.paused ? 0 : Math.max(0, handoff.end - out.currentTime);
+        // Stopped already (its end, or the doubled-header guard's stop):
+        // measure from when that happened.
+        const stopped = out.paused && endedAtRef.current > 0;
+        // More than a head start left means a skip (Next while armed).
+        const playsOut = left > 0 && left * 1000 <= GAPLESS_HEAD_START_MS + 100;
+        const endAt = stopped
+          ? endedAtRef.current
+          : playsOut
+            ? now + left * 1000
+            : now;
+        const endFrom = stopped
+          ? "A's stop"
+          : playsOut
+            ? "handoff + time left"
+            : left === 0
+              ? "A already at its end at the handoff"
+              : "skip, A stopped at the handoff";
+        const startSrc = idle.src;
         const lastUpdate = lastTimeUpdateAtRef.current;
+        endedAtRef.current = 0;
+        // A plays out what's left of a head start and stops at its end; on
+        // a skip it stops now.
+        const finish = () => {
+          if (releasingRef.current !== out) return;
+          // A skip is ramping it out.
+          if (playsOut && playOutRef.current?.el !== out) return;
+          playOutRef.current = null;
+          releasingRef.current = null;
+          emptyElement(out);
+          // Only while B is still current; a skip's own load already
+          // dropped degraded copies, sparing its track.
+          if (audioRef.current === idle && idle.src === startSrc)
+            evictDegraded(streamVideoId);
+        };
+        releasingRef.current = out;
+        if (playsOut) {
+          playOutRef.current = { el: out, gain: handoff.gainOut };
+          out.addEventListener("ended", finish, { once: true });
+          // Its natural end comes first; a stop would drop queued audio.
+          window.setTimeout(finish, left * 1000 + OUTPUT_DELAY_MS);
+        } else {
+          finish();
+        }
+        idle.volume = 0;
+        rampingRef.current = true;
+        joinRef.current = { el: idle, src: startSrc, endAt };
         idle.addEventListener(
           "playing",
-          () =>
-            appLog(
-              `[gapless] gap ${Math.round(performance.now() - lastUpdate)}ms from the last timeupdate to playing`,
-            ),
+          () => {
+            // A skip may have loaded another track into this element.
+            if (idle.src !== startSrc || audioRef.current !== idle) return;
+            const at = performance.now();
+            // `playing` fires long before B is heard, so time when its
+            // clock starts moving too. Still not the output: QA's capture is.
+            const clock = () => {
+              if (idle.src !== startSrc || audioRef.current !== idle) return;
+              const now = performance.now();
+              const moved = idle.currentTime > 0;
+              if (moved || now - at > 2000) {
+                appLog(
+                  `[gapless] ${moved ? `B's clock started ${Math.round(now - endAt)}ms` : "B's clock didn't start within 2 s"} from A's end (${endFrom}; negative is overlap); its playing event at ${Math.round(at - endAt)}ms, ${Math.round(at - lastUpdate)}ms from A's last timeupdate; B's gain then ${idle.volume.toFixed(2)}`,
+                );
+                return;
+              }
+              window.setTimeout(clock, 5);
+            };
+            clock();
+          },
           { once: true },
         );
       }
@@ -1144,6 +1239,18 @@ export function useAudioEngine() {
       return;
     }
     cutTail();
+    // A skip during A's gapless play-out.
+    const po = playOutRef.current;
+    if (po && !sameSlot) {
+      playOutRef.current = null;
+      if (releasingRef.current === po.el) rampOut(po.el);
+    }
+    // A skip during B's start ramp: whatever loads next plays at full.
+    if (rampingRef.current) {
+      rampingRef.current = false;
+      joinRef.current = null;
+      el.volume = masterVolume();
+    }
     // Stop the previous track immediately. Without this the old src keeps
     // playing through the streamUrlFor() round-trip (~50–500 ms), so the
     // user hears the tail of track A bleed into the start of track B.
@@ -1774,8 +1881,12 @@ export function useAudioEngine() {
   useEffect(() => {
     const el = audioRef.current;
     if (!el) return;
-    // Mid-fade the crossfade tick sets both elements every few ms.
-    if (fadeRef.current) return;
+    // Mid-fade the crossfade tick sets both elements every few ms, and
+    // B's gapless start ramp sets the master's volume (not its mute).
+    if (fadeRef.current || rampingRef.current) {
+      el.muted = muted;
+      return;
+    }
     // <audio>.volume is linear amplitude (0..1), but loudness perception
     // is logarithmic — a linear slider crams almost all the perceivable
     // change into the bottom ~20% and 20–100% sounds nearly identical.
@@ -1844,6 +1955,37 @@ export function useAudioEngine() {
       const idle = idleRef.current;
       if (!el || !idle) return;
       const s = usePlaybackStore.getState();
+
+      // An outgoing element still playing out (a gapless head start, or a
+      // skip's 150 ms ramp) follows mute, and stops on a pause.
+      // A gapless join: B up its curve against A's end. A pause or a skip
+      // ends it at full.
+      const j = joinRef.current;
+      if (j) {
+        const live = audioRef.current === j.el && j.el.src === j.src;
+        const k = gaplessGain(j.endAt - performance.now());
+        if (!live || !s.playing || k >= 1) {
+          joinRef.current = null;
+          rampingRef.current = false;
+          if (live) j.el.volume = masterVolume();
+        } else {
+          j.el.volume = masterVolume() * k;
+        }
+      }
+      const r = releasingRef.current;
+      if (r) {
+        r.muted = s.muted;
+        const po = playOutRef.current;
+        if (po?.el === r) {
+          const v = Math.max(0, Math.min(1, s.volume));
+          r.volume = Math.min(1, v ** 3 * po.gain);
+        }
+        if (!s.playing) {
+          releasingRef.current = null;
+          playOutRef.current = null;
+          emptyElement(r);
+        }
+      }
 
       const f = fadeRef.current;
       if (f) {
@@ -1955,10 +2097,18 @@ export function useAudioEngine() {
       }
       if (!p.ready || !p.src) return;
 
-      if (handoffRef.current) {
-        // Gapless armed: the end latch advances, or the head start does.
-        if (pos >= end - GAPLESS_HEAD_START_MS / 1000 && GAPLESS_HEAD_START_MS)
+      const armed = handoffRef.current;
+      if (armed) {
+        // Gapless armed: the head start advances, or else the end latch.
+        // Once only: the store advancing reaches the resolve effect a
+        // render later, and this runs every 25 ms.
+        if (
+          !armed.fired &&
+          pos >= end - GAPLESS_HEAD_START_MS / 1000
+        ) {
+          armed.fired = true;
           advanceAfterTrack();
+        }
         return;
       }
       // The rows' own lengths too: correctedDuration leaves a doubled
@@ -1997,6 +2147,13 @@ export function useAudioEngine() {
     return () => {
       window.clearInterval(timer);
       handoffRef.current = null;
+      // A join mid-rise would stay at its last gain with no tick to finish it.
+      const j = joinRef.current;
+      if (j) {
+        joinRef.current = null;
+        rampingRef.current = false;
+        if (audioRef.current === j.el) j.el.volume = masterVolume();
+      }
       cutTail();
       resetIdle();
     };
