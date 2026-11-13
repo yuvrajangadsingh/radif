@@ -2221,6 +2221,41 @@ async fn credential_store_ready() -> Result<(), String> {
     Ok(())
 }
 
+/// What a jar rewrite did, by cookie: "domain name" lists of the ones it
+/// deleted, changed the value of, and added. Never values. For the echo's
+/// log line, so a Google sign-out (its session cookies deleted) can be told
+/// from a routine SIDCC rotation.
+fn jar_name_diff(before: &str, after: &str) -> (Vec<String>, Vec<String>, Vec<String>) {
+    // Keyed like a stored cookie (domain, path, name), so two copies on
+    // different paths can't hide each other's change.
+    type Key<'a> = (&'a str, &'a str, &'a str);
+    let index = |jar| -> HashMap<Key, &str> {
+        session::parse_jar(jar)
+            .map(|c| ((c.domain, c.path, c.name), c.value))
+            .collect()
+    };
+    let old = index(before);
+    let new = index(after);
+    let label = |(d, p, n): &Key| {
+        if *p == "/" {
+            format!("{d} {n}")
+        } else {
+            format!("{d}{p} {n}")
+        }
+    };
+    let mut deleted: Vec<String> = old.keys().filter(|k| !new.contains_key(*k)).map(label).collect();
+    let mut changed: Vec<String> = old
+        .iter()
+        .filter(|(k, v)| new.get(*k).is_some_and(|nv| nv != *v))
+        .map(|(k, _)| label(k))
+        .collect();
+    let mut added: Vec<String> = new.keys().filter(|k| !old.contains_key(*k)).map(label).collect();
+    deleted.sort();
+    changed.sort();
+    added.sort();
+    (deleted, changed, added)
+}
+
 /// Log the cookies the new snapshot would drop or roll back relative to the
 /// jar it replaces. The keeper snapshot overwrites wholesale, so anything a
 /// `Set-Cookie` merge learned since the last cycle disappears here; that has
@@ -2488,7 +2523,7 @@ async fn auth_state(app: &tauri::AppHandle, host: &str) -> session::AuthStatus {
     let Some(id) = idx.active else {
         return session::AuthStatus::signed_out("no active account");
     };
-    match read_jar(app, &id).await {
+    let mut status = match read_jar(app, &id).await {
         JarRead::Absent => session::AuthStatus::signed_out("no cookie jar for the active account"),
         // Decrypt failures land here, including the macOS dark-wake case
         // where the login keychain will not open. The session on disk is
@@ -2505,10 +2540,16 @@ async fn auth_state(app: &tauri::AppHandle, host: &str) -> session::AuthStatus {
             if creds.signable() {
                 session::AuthStatus::usable()
             } else {
-                session::AuthStatus::signed_out(creds.missing())
+                session::AuthStatus::signed_out(format!(
+                    "{} ({})",
+                    creds.missing(),
+                    session::signing_report(&jar, host, session::INNERTUBE_PATH, now_ts())
+                ))
             }
         }
-    }
+    };
+    status.account = Some(id);
+    status
 }
 
 /// Tri-state auth answer for the UI. `is_logged_in` keeps its boolean shape
@@ -2528,6 +2569,22 @@ async fn is_logged_in(app: tauri::AppHandle) -> Result<bool, String> {
     // what showed a signed-in user the sign-in button after a dark wake.
     if status.is_unknown() {
         return Err(status.reason);
+    }
+    // Once per change, not per call: the UI asks every 30 seconds. Keyed
+    // by account, so a switch between two signed-out accounts still logs.
+    static LAST_NO: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+    if status.is_usable() {
+        *LAST_NO.lock().unwrap_or_else(|p| p.into_inner()) = None;
+    } else {
+        // The account the answer was about, not a fresh read that a switch
+        // could have moved on.
+        let id = status.account.as_deref().unwrap_or("-");
+        let key = format!("{id}: {}", status.reason);
+        let mut last = LAST_NO.lock().unwrap_or_else(|p| p.into_inner());
+        if last.as_deref() != Some(key.as_str()) {
+            eprintln!("[auth] is_logged_in: no for {key}");
+            *last = Some(key);
+        }
     }
     Ok(status.is_usable())
 }
@@ -3178,14 +3235,30 @@ async fn merge_response_cookies(
         return Ok(false);
     }
 
+    // Names only, worked out before the jar is moved out to be encrypted.
+    let diff = value_changed.then(|| jar_name_diff(&jar, &merged));
     let bytes = merged.into_bytes();
     let encrypted = tokio::task::spawn_blocking(move || secure_store::encrypt(&bytes))
         .await
         .map_err(|e| format!("encrypt join: {e}"))?
         .map_err(|e| format!("encrypt cookies: {e}"))?;
     authfs::write_atomic(account_cookies_path(&app, &id), encrypted, 0o600).await?;
-    if value_changed {
-        eprintln!("[auth] echoed rotated session cookie(s) into the active jar");
+    if let Some((deleted, changed, added)) = diff {
+        let part = |what: &str, names: &[String]| {
+            (!names.is_empty()).then(|| format!("{what}: {}", names.join(", ")))
+        };
+        let parts: Vec<String> = [
+            part("deleted", &deleted),
+            part("changed", &changed),
+            part("added", &added),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        eprintln!(
+            "[auth] echoed rotated session cookie(s) into the active jar; {}",
+            parts.join("; ")
+        );
     }
     Ok(value_changed)
 }
@@ -5968,6 +6041,25 @@ mod tests {
          .youtube.com\tTRUE\t/\tTRUE\t1800000000\tSAPISID\told-sapisid\n\
          .youtube.com\tTRUE\t/\tTRUE\t1800000000\tSIDCC\told-sidcc\n"
             .to_string()
+    }
+
+    #[test]
+    fn the_echo_names_what_it_deleted_changed_and_added() {
+        let lines = vec![
+            "SAPISID=; Domain=.youtube.com; Path=/; Secure; Max-Age=0".to_string(),
+            "SIDCC=new-sidcc; Domain=.youtube.com; Path=/; Secure; Max-Age=31536000".to_string(),
+            "YSC=fresh; Domain=.youtube.com; Path=/; Secure".to_string(),
+        ];
+        let before = jar();
+        let (after, changed, _) = merge_set_cookies_into_jar(&before, &lines, HOST, NOW);
+        assert!(changed);
+        let (deleted, changed, added) = super::jar_name_diff(&before, &after);
+        assert_eq!(deleted, vec!["youtube.com SAPISID"]);
+        assert_eq!(changed, vec!["youtube.com SIDCC"]);
+        assert_eq!(added, vec!["youtube.com YSC"]);
+        // Names only: no value reaches the lists.
+        let all = [deleted, changed, added].concat().join(" ");
+        assert!(!all.contains("sidcc") && !all.contains("fresh") && !all.contains("old-"));
     }
 
     #[test]
