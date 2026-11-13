@@ -455,25 +455,20 @@ export function ProgressSlider({
   seek: (v: number) => void;
   disabled: boolean;
 }) {
-  const wrapperRef = useRef<HTMLDivElement | null>(null);
-  const [hoverX, setHoverX] = useState<number | null>(null);
-  const [hoverTime, setHoverTime] = useState<number | null>(null);
+  // A fraction of the bar, not seconds: the time is read off the current
+  // duration when drawn, so a track change under a still pointer updates it.
+  const [hoverFrac, setHoverFrac] = useState<number | null>(null);
 
   // While the user is dragging the thumb, the slider thumb captures pointer
   // events so onMouseMove on the wrapper stops firing. Sync the tooltip with
   // the live `scrub` value instead.
   useEffect(() => {
     if (scrub === null) return;
-    const rect = wrapperRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const max = Math.max(duration, 1);
-    setHoverX((scrub / max) * rect.width);
-    setHoverTime(Math.round(scrub));
+    setHoverFrac(scrub / Math.max(duration, 1));
   }, [scrub, duration]);
 
   return (
     <div
-      ref={wrapperRef}
       className={cn(
         "relative before:absolute before:-inset-y-2 before:inset-x-0 before:content-['']",
         !disabled && "cursor-pointer",
@@ -482,21 +477,19 @@ export function ProgressSlider({
         if (disabled || scrub !== null) return;
         const rect = e.currentTarget.getBoundingClientRect();
         const x = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
-        setHoverX(x);
-        setHoverTime(Math.round((x / rect.width) * Math.max(duration, 1)));
+        setHoverFrac(rect.width > 0 ? x / rect.width : null);
       }}
       onMouseLeave={() => {
         if (scrub !== null) return;
-        setHoverX(null);
-        setHoverTime(null);
+        setHoverFrac(null);
       }}
     >
-      {hoverX !== null && hoverTime !== null ? (
+      {hoverFrac !== null ? (
         <div
           className="pointer-events-none absolute -top-8 z-10 -translate-x-1/2 rounded bg-black/85 px-2 py-0.5 text-sm font-medium tabular-nums text-white shadow"
-          style={{ left: hoverX }}
+          style={{ left: `${hoverFrac * 100}%` }}
         >
-          {formatTime(hoverTime)}
+          {formatTime(Math.round(hoverFrac * Math.max(duration, 1)))}
         </div>
       ) : null}
       <Slider
