@@ -27,8 +27,14 @@ function Slider({
   min = 0,
   max = 100,
   thumbless = false,
+  thumbLabel,
+  thumbValueText,
   ...props
 }: React.ComponentProps<typeof SliderPrimitive.Root> & {
+  /** The thumb carries role="slider", so its name and spoken value go
+   *  there, not on the root. */
+  thumbLabel?: string
+  thumbValueText?: string
   /** Apple-Music-style bar: continuous two-tone rail with no visible
    *  knob and no break — dragging still works, the whole rail is the
    *  handle. Used by the playback progress bar; volume keeps the knob. */
@@ -132,6 +138,8 @@ function Slider({
         <SliderPrimitive.Thumb
           data-slot="slider-thumb"
           key={index}
+          aria-label={thumbLabel}
+          aria-valuetext={thumbValueText}
           className={thumbless
             ? "block size-0 overflow-hidden focus-visible:outline-hidden"
             : "block shrink-0 rounded-full bg-white shadow-[0_0_3px_rgba(255,255,255,0.35),0_0_8px_rgba(255,255,255,0.15)] transition-shadow hover:shadow-[0_0_5px_rgba(255,255,255,0.5),0_0_12px_rgba(255,255,255,0.25)] focus-visible:shadow-[0_0_5px_rgba(255,255,255,0.5),0_0_12px_rgba(255,255,255,0.25)] focus-visible:outline-hidden disabled:pointer-events-none disabled:opacity-50 data-[orientation=horizontal]:h-5 data-[orientation=horizontal]:w-1.5 data-[orientation=vertical]:h-1.5 data-[orientation=vertical]:w-5"}

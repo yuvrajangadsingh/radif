@@ -4,6 +4,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
   AudioLinesIcon,
+  BlendIcon,
+  MergeIcon,
   BellIcon,
   Loader2Icon,
   LogInIcon,
@@ -15,7 +17,9 @@ import {
 import { toast } from "sonner";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
+import { CROSSFADE_SHIPPED } from "@/lib/crossfade";
 import { Group, SettingRow, TabPane } from "@/components/settings/primitives";
 import { IS_MAC } from "@/lib/platform";
 import { authLoggedInQuery } from "@/lib/store/auth-queries";
@@ -124,6 +128,10 @@ function BehaviorGroup() {
   const accounts = useAccounts().data;
   const signedIn = !accounts || accounts.some((a) => a.isActive);
   const setNormalizeVolume = useSettingsStore((s) => s.setNormalizeVolume);
+  const crossfadeSeconds = useSettingsStore((s) => s.crossfadeSeconds);
+  const setCrossfadeSeconds = useSettingsStore((s) => s.setCrossfadeSeconds);
+  const gapless = useSettingsStore((s) => s.gapless);
+  const setGapless = useSettingsStore((s) => s.setGapless);
   const notchSongPeek = useSettingsStore((s) => s.notchSongPeek);
   const setNotchSongPeek = useSettingsStore((s) => s.setNotchSongPeek);
 
@@ -190,6 +198,47 @@ function BehaviorGroup() {
           />
         }
       />
+      {CROSSFADE_SHIPPED && (
+        <>
+          <SettingRow
+            icon={BlendIcon}
+            title="Crossfade"
+            description="The end of each song blends into the start of the next."
+            control={
+              <div className="flex w-44 items-center gap-3">
+                <Slider
+                  value={[crossfadeSeconds]}
+                  min={0}
+                  max={12}
+                  step={1}
+                  onValueChange={([v]) => setCrossfadeSeconds(v)}
+                  thumbLabel="Crossfade length"
+                  thumbValueText={
+                    crossfadeSeconds === 0
+                      ? "Off"
+                      : `${crossfadeSeconds} seconds`
+                  }
+                />
+                <span className="w-9 shrink-0 text-right text-sm tabular-nums text-muted-foreground">
+                  {crossfadeSeconds === 0 ? "Off" : `${crossfadeSeconds} s`}
+                </span>
+              </div>
+            }
+          />
+          <SettingRow
+            icon={MergeIcon}
+            title="Gapless"
+            description="No silence between songs, for live albums and mixes. Used when crossfade is off, or a song is too short to fade."
+            control={
+              <Switch
+                checked={gapless}
+                onCheckedChange={setGapless}
+                aria-label="Gapless"
+              />
+            }
+          />
+        </>
+      )}
       {IS_MAC && (
         <SettingRow
           icon={PanelTopIcon}
