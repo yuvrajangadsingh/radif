@@ -216,7 +216,7 @@ function BehaviorGroup() {
                   thumbValueText={
                     crossfadeSeconds === 0
                       ? "Off"
-                      : `${crossfadeSeconds} seconds`
+                      : `${crossfadeSeconds} second${crossfadeSeconds === 1 ? "" : "s"}`
                   }
                 />
                 <span className="w-9 shrink-0 text-right text-sm tabular-nums text-muted-foreground">
