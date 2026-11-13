@@ -7,7 +7,7 @@ import { OUTRO_GRACE_S, OUTRO_TAIL_MIN_S } from "@/lib/outro";
 /** False until the release that ships crossfade (1.0): its Settings rows
  *  are hidden and the engine ignores the settings, even ones kept from a
  *  listen build. Delete it in that release. */
-export const CROSSFADE_SHIPPED = false;
+export const CROSSFADE_SHIPPED = true;
 
 /** Either track shorter than this never fades. */
 export const MIN_TRACK_S = 10;
