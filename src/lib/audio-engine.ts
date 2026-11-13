@@ -19,6 +19,7 @@ import {
   fadeNow,
   GAPLESS_HEAD_START_MS,
   gaplessGain,
+  CROSSFADE_SHIPPED,
   handoffBlocked,
   MIN_FADE_S,
   PREP_LEAD_S,
@@ -337,6 +338,8 @@ export function useAudioEngine() {
     gainOut: number;
     /** A gapless head start already advanced the store. */
     fired?: boolean;
+    /** The settings it was armed under; a change before it fires re-plans. */
+    cfg?: string;
   } | null>(null);
   const fadeRef = useRef<{
     tail: HTMLVideoElement;
@@ -2013,7 +2016,7 @@ export function useAudioEngine() {
   // element's own clock, so a pause freezes it and a resume picks it up.
   const crossfadeSeconds = useSettingsStore((s) => s.crossfadeSeconds);
   const gapless = useSettingsStore((s) => s.gapless);
-  const handoffOn = crossfadeSeconds > 0 || gapless;
+  const handoffOn = CROSSFADE_SHIPPED && (crossfadeSeconds > 0 || gapless);
   useEffect(() => {
     if (!handoffOn) return;
     const prepare = (slotId: number, streamId: string) => {
@@ -2211,6 +2214,14 @@ export function useAudioEngine() {
       if (armed) {
         // A seek into an outro moves the end; the adoption reads this one.
         armed.end = end;
+        // Crossfade or gapless changed in Settings: plan this change again.
+        if (
+          !armed.fired &&
+          armed.cfg !== `${settings.crossfadeSeconds}/${settings.gapless}`
+        ) {
+          handoffRef.current = null;
+          return;
+        }
         // Gapless armed: the head start advances, or else the end latch.
         // Once only: the store advancing reaches the resolve effect a
         // render later, and this runs every 25 ms.
@@ -2252,6 +2263,7 @@ export function useAudioEngine() {
           fade: 0,
           end,
           gainOut: loudnessGainRef.current,
+          cfg: `${settings.crossfadeSeconds}/${settings.gapless}`,
         };
       }
     };

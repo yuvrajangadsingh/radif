@@ -72,10 +72,10 @@ type State = {
    *  See `lib/lyrics/romanize.ts`. */
   romanizeLyrics: boolean;
   /** Seconds the end of one track overlaps the start of the next; 0 is off.
-   *  Hidden, no UI until QA passes it. See `lib/crossfade.ts`. */
+   *  Settings > General, behind CROSSFADE_SHIPPED. See `lib/crossfade.ts`. */
   crossfadeSeconds: number;
   /** Start the next track the moment this one ends, from a preloaded
-   *  element. Hidden, no UI until QA passes it. */
+   *  element. Settings > General, behind CROSSFADE_SHIPPED. */
   gapless: boolean;
   setCloseAction: (v: CloseButtonAction) => void;
   setCacheAutoClean: (v: CacheAutoCleanPeriod) => void;
@@ -90,6 +90,8 @@ type State = {
   setLastfmAvatar: (v: string | null) => void;
   setYtHistory: (v: boolean) => void;
   setNormalizeVolume: (v: boolean) => void;
+  setCrossfadeSeconds: (v: number) => void;
+  setGapless: (v: boolean) => void;
   setRomanizeLyrics: (v: boolean) => void;
   /** Store the account returned by the connect flow and enable scrobbling. */
   setLastfmSession: (username: string, sessionKey: string) => void;
@@ -147,6 +149,8 @@ export const useSettingsStore = create<State>()(
       setLastfmAvatar: (lastfmAvatar) => set({ lastfmAvatar }),
       setYtHistory: (ytHistory) => set({ ytHistory }),
       setNormalizeVolume: (normalizeVolume) => set({ normalizeVolume }),
+      setCrossfadeSeconds: (crossfadeSeconds) => set({ crossfadeSeconds }),
+      setGapless: (gapless) => set({ gapless }),
       setRomanizeLyrics: (romanizeLyrics) => set({ romanizeLyrics }),
       setLastfmSession: (lastfmUsername, lastfmSessionKey) =>
         set({ lastfmUsername, lastfmSessionKey, lastfmEnabled: true }),
