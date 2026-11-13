@@ -36,6 +36,7 @@ mod media;
 mod notch;
 mod session;
 mod stream_proxy;
+mod traffic_lights;
 mod ytdlp;
 
 fn sanitize_video_id(id: &str) -> bool {
@@ -5582,6 +5583,18 @@ pub fn run() {
             lastfm::lastfm_flush,
         ])
         .on_window_event(|window, event| {
+            // AppKit lays the title bar out again on these; put the lights back.
+            if window.label() == "main"
+                && matches!(
+                    event,
+                    tauri::WindowEvent::Resized(_)
+                        | tauri::WindowEvent::Focused(_)
+                        | tauri::WindowEvent::ThemeChanged(_)
+                        | tauri::WindowEvent::ScaleFactorChanged { .. }
+                )
+            {
+                traffic_lights::place(window);
+            }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 match window.label() {
                     // Main window: hide to tray or quit, per the user's
@@ -5796,6 +5809,9 @@ pub fn run() {
                         eprintln!("[webkit] no hidden-page timer throttling switch; left on");
                     }
                 });
+            }
+            if let Some(w) = app.get_webview_window("main") {
+                traffic_lights::place(&w.as_ref().window());
             }
             // Debug builds swap the taskbar/window icon to the orange
             // dev variant (see runtime_icon) so a dev instance is
