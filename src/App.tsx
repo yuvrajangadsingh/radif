@@ -12,6 +12,7 @@ import { routeTree } from "@/routeTree.gen";
 import { isFloatingPlayerWindow } from "@/lib/floating-player";
 import FloatingPlayerApp from "@/components/layout/floating-player-app";
 import { wireQueryFocusToWindow } from "@/lib/query-focus";
+import { blocksInAppPageLoad } from "@/lib/modified-link-click";
 
 // Both windows run this bundle and each has its own query client, so
 // each wires its own window. Module scope, not an effect: the manager
@@ -24,6 +25,28 @@ const router = createRouter({
   defaultPreloadStaleTime: 0,
   context: { queryClient },
 });
+
+// Capture phase, so a handler that stops propagation can't hide the click.
+// The router's <Link> skips modified clicks either way. auxclick is the
+// middle button.
+if (!isFloatingPlayerWindow()) {
+  const block = (e: MouseEvent) => {
+    const a = (e.target as Element | null)?.closest?.("a[href]");
+    if (
+      blocksInAppPageLoad(
+        e,
+        a instanceof HTMLAnchorElement
+          ? { href: a.href, download: a.hasAttribute("download") }
+          : null,
+        window.location.href,
+      )
+    ) {
+      e.preventDefault();
+    }
+  };
+  document.addEventListener("click", block, true);
+  document.addEventListener("auxclick", block, true);
+}
 
 declare module "@tanstack/react-router" {
   interface Register {

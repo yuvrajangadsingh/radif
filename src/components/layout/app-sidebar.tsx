@@ -107,6 +107,10 @@ const NAV_ITEMS = [
 const LIKED_ID = "VLLM";
 
 const MENU_BTN_CLS = "group-data-[collapsible=icon]:mx-auto";
+// Collapsed playlist rows: a 40px button around a 28px cover, so 2x2
+// mosaics stay recognizable. Fits the 4rem rail (48px inside the group).
+const COVER_BTN_CLS =
+  "group-data-[collapsible=icon]:size-10! group-data-[collapsible=icon]:p-1.5!";
 
 export function AppSidebar() {
   const { location } = useRouterState();
@@ -363,18 +367,18 @@ function SidebarPlaylists({
                     asChild
                     isActive={isPlaylistOn(p.id)}
                     tooltip={p.title}
-                    className={MENU_BTN_CLS}
+                    className={`${MENU_BTN_CLS} ${COVER_BTN_CLS}`}
                   >
                     <Link to="/playlist/$id" params={{ id: p.id }}>
                       {p.thumbnailUrl ? (
                         <img
                           src={p.thumbnailUrl}
                           alt=""
-                          className="size-4 shrink-0 rounded-sm object-cover"
+                          className="size-4 shrink-0 rounded-sm object-cover group-data-[collapsible=icon]:size-7"
                           loading="lazy"
                         />
                       ) : (
-                        <ListMusicIcon />
+                        <ListMusicIcon className="group-data-[collapsible=icon]:size-7! group-data-[collapsible=icon]:p-1" />
                       )}
                       <span className="min-w-0 flex-1 truncate">
                         {p.title}

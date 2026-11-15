@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 import { useRouter } from "@tanstack/react-router";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
@@ -130,23 +130,62 @@ export function TopBar() {
     };
   }, []);
 
+  // On macOS the bar is a 52 pt unified-toolbar height with the traffic
+  // lights centred in it (src-tauri/src/traffic_lights.rs places them).
+  // Fullscreen hides the lights, so the bar goes back to 36 px there.
+  // The sidebar, side card and fullscreen player read the same variable.
+  useLayoutEffect(() => {
+    document.documentElement.style.setProperty(
+      "--titlebar-h",
+      IS_MAC && !fullscreen ? "52px" : "36px",
+    );
+  }, [fullscreen]);
+
   const win = () => getCurrentWindow();
 
   return (
     <>
       <header
         data-tauri-drag-region
-        className="relative z-30 flex h-9 shrink-0 select-none items-center"
+        className="relative z-30 flex h-(--titlebar-h) shrink-0 select-none items-center"
       >
-        {/* On macOS the native traffic lights overlay the top-left corner
-            (trafficLightPosition x:14 + ~54px of buttons), so the nav
-            cluster starts clear of them. In fullscreen the lights are gone,
-            so the padding goes with them. */}
+        {/* On macOS the traffic lights sit at x 20 pt (traffic_lights.rs),
+            so the nav starts clear of them, the way Mac apps put the
+            sidebar toggle and back/forward after the lights. In fullscreen
+            the lights are gone, so the padding goes with them. */}
         <div
           className={`flex items-center gap-1 ${
-            IS_MAC && !fullscreen ? "pl-[78px]" : "pl-2"
+            IS_MAC && !fullscreen ? "pl-[86px]" : "pl-2"
           }`}
         >
+          <SidebarTrigger className={NAV_BTN_CLS} />
+          <Button
+            variant="ghost"
+            size="icon"
+            className={NAV_BTN_CLS}
+            onClick={() => router.history.back()}
+            aria-label="Back"
+          >
+            <ArrowLeftIcon />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className={NAV_BTN_CLS}
+            onClick={() => router.history.forward()}
+            aria-label="Forward"
+          >
+            <ArrowRightIcon />
+          </Button>
+        </div>
+
+        {/* Drag spacer — fills remaining width so the user can grab
+            almost anywhere in the bar to move the window. */}
+        <div data-tauri-drag-region className="h-full flex-1" />
+
+        {/* The More menu (Settings, Check for Updates, Quit) at the right
+            end, away from the traffic lights. */}
+        <div className={`flex items-center ${IS_MAC ? "pr-3" : "pr-1"}`}>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
@@ -158,7 +197,7 @@ export function TopBar() {
                 <MoreHorizontalIcon />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-56">
+            <DropdownMenuContent align="end" className="w-56">
               <DropdownMenuItem onSelect={() => openSettings()}>
                 <SettingsIcon />
                 Settings
@@ -197,31 +236,7 @@ export function TopBar() {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-
-          <SidebarTrigger className={NAV_BTN_CLS} />
-          <Button
-            variant="ghost"
-            size="icon"
-            className={NAV_BTN_CLS}
-            onClick={() => router.history.back()}
-            aria-label="Back"
-          >
-            <ArrowLeftIcon />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className={NAV_BTN_CLS}
-            onClick={() => router.history.forward()}
-            aria-label="Forward"
-          >
-            <ArrowRightIcon />
-          </Button>
         </div>
-
-        {/* Drag spacer — fills remaining width so the user can grab
-            almost anywhere in the bar to move the window. */}
-        <div data-tauri-drag-region className="h-full flex-1" />
 
         {!IS_MAC && (
           <div className="flex h-full items-center">

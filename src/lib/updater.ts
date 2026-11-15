@@ -3,12 +3,48 @@ import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { toast } from "sonner";
 import { useUpdateStore } from "@/lib/store/update";
+import { appLog } from "@/lib/app-log";
 
 const TOAST_ID = "app-update";
 
-// One check-or-install flow at a time: a second trigger while a download
-// is running must not start a parallel downloadAndInstall.
+// One install at a time: a second trigger while a download is running
+// must not start a parallel downloadAndInstall.
 let busy = false;
+
+// A connection to GitHub can stall for 75 s (macOS's connect timeout)
+// before it fails, and the plugin has no timeout of its own. That likely
+// held QA round 36's startup check, while the manual check behind it
+// returned silently, so the offer came 2 minutes late.
+const CHECK_TIMEOUT_MS = 15_000;
+let checking: Promise<Update | null> | null = null;
+
+/** One check at a time; a second caller waits for the same answer. */
+function runCheck(kind: string): Promise<Update | null> {
+  if (checking) {
+    appLog(`[updater] ${kind} check waits for the one in flight`);
+    return checking;
+  }
+  const t0 = performance.now();
+  const took = () => `${Math.round(performance.now() - t0)}ms`;
+  appLog(`[updater] ${kind} check started`);
+  checking = check({ timeout: CHECK_TIMEOUT_MS })
+    .then(
+      (update) => {
+        appLog(
+          `[updater] ${kind} check: ${update ? `${update.version} available` : "up to date"} in ${took()}`,
+        );
+        return update;
+      },
+      (e: unknown) => {
+        appLog(`[updater] ${kind} check failed in ${took()}: ${String(e)}`);
+        throw e;
+      },
+    )
+    .finally(() => {
+      checking = null;
+    });
+  return checking;
+}
 
 /**
  * Check GitHub Releases for a newer version. On success the result is
@@ -29,30 +65,32 @@ export async function checkForUpdates({ silent }: { silent: boolean }): Promise<
     return;
   }
   if (busy) return;
-  busy = true;
+  let update: Update | null;
   try {
-    let update: Update | null;
-    try {
-      update = await check();
-    } catch (e) {
-      if (!silent) {
-        toast.error("Couldn't check for updates", {
-          id: TOAST_ID,
-          description: String(e),
-        });
-      }
-      return;
+    update = await runCheck(silent ? "startup" : "manual").catch((e) =>
+      // Once more on a fresh connection; a stalled one rarely repeats.
+      silent ? runCheck("startup retry") : Promise.reject(e),
+    );
+  } catch (e) {
+    if (!silent) {
+      toast.error("Couldn't check for updates", {
+        id: TOAST_ID,
+        description: String(e),
+      });
     }
-
-    if (!update) {
-      if (!silent) toast.success("You're on the latest version.", { id: TOAST_ID });
-      return;
-    }
-
-    useUpdateStore.getState().setAvailable(update.version, update);
-  } finally {
-    busy = false;
+    return;
   }
+
+  if (!update) {
+    if (!silent) toast.success("You're on the latest version.", { id: TOAST_ID });
+    return;
+  }
+
+  // An install that started while this check ran owns the banner now.
+  const { phase } = useUpdateStore.getState();
+  if (phase === "downloading" || phase === "installing" || phase === "ready")
+    return;
+  useUpdateStore.getState().setAvailable(update.version, update);
 }
 
 /**

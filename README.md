@@ -152,6 +152,8 @@ one exists, and recent searches are kept. The player can sit along the bottom,
 on the right, or in a small window you can pin on top. Playlists, likes,
 albums, artists, search with filters and radio are all there, and media keys
 and Now Playing stay in sync with the app both ways.
+A playlist can be sorted by title, artist or length, for viewing only: the
+playlist on YouTube isn't changed, and each playlist remembers its sort.
 
 > Radif is an unofficial client. It isn't affiliated with, endorsed by, or
 > sponsored by Google or YouTube. "YouTube" and "YouTube Music" are trademarks

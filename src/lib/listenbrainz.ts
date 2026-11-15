@@ -103,11 +103,6 @@ async function submit(
   }
 }
 
-/** False until the release that ships ListenBrainz: its Settings block is
- *  hidden and nothing is sent, even with a token kept from a test build.
- *  Delete it in that release. */
-export const LISTENBRAINZ_SHIPPED = false;
-
 /** Mounted once in AppShell, next to the Last.fm scrobbler. Each play is
  *  timed by `watchListen`, the clock YouTube history uses: playing_now when
  *  the audio first moves, a listen at half the track or 4 minutes. Keyed on
@@ -116,7 +111,7 @@ export const LISTENBRAINZ_SHIPPED = false;
 export function useListenbrainzScrobbler(): void {
   const enabled = useSettingsStore((s) => s.listenbrainzEnabled);
   const hasToken = useSettingsStore((s) => !!s.listenbrainzToken);
-  const active = LISTENBRAINZ_SHIPPED && enabled && hasToken;
+  const active = enabled && hasToken;
   const index = usePlaybackStore((s) => s.index);
   const videoId = usePlaybackStore((s) =>
     s.index >= 0 ? s.queue[s.index]?.videoId : undefined,

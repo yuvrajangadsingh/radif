@@ -9,6 +9,25 @@ time; they are quoted, not rounded up.
 
 ---
 
+## 2026-11-10 · Uploaded music parked
+
+**Decided:** uploads (feature 7 in the queue below) is parked. No parser is
+built. The queue moves on to the AI-music filter, built as "Hide this
+artist".
+
+**Why:** the listing endpoints are known (`FEmusic_library_privately_owned_tracks`
+and `_releases`), and a signed-in probe of them works, but the maintainer's
+account has no uploads: both answered with "No songs uploaded yet" / "No
+albums uploaded yet" and zero rows. A parser written from another library's
+source alone, with no real row to test against, can't be checked, and
+whether yt-dlp plays an uploaded track with our cookies is unchecked too.
+
+**Comes back when:** a user with uploads gives us a response to build the
+parser against, with every id, title and artist replaced before it's
+committed.
+
+---
+
 ## 2026-11-10 · The feature queue, from what people ask for
 
 **Decided:** one feature per release, in this order, each its own PR and its
