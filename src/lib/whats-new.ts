@@ -55,6 +55,38 @@ export type WhatsNewEntry = {
  */
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    version: "0.10.0",
+    date: "November 15, 2026",
+    summary: "Your listens on ListenBrainz",
+    changes: [
+      {
+        type: "new",
+        title: "ListenBrainz",
+        text: "Paste your ListenBrainz user token in Settings, Integrations, and what you play goes to your ListenBrainz profile: a listen once you've heard half a song or 4 minutes. Off until you add a token.",
+      },
+      {
+        type: "fixed",
+        title: "Update check",
+        text: "A slow connection no longer holds back the update offer, and Check for Updates always tells you what it found.",
+      },
+      {
+        type: "improved",
+        title: "Top bar",
+        text: "The window buttons sit centred in the top bar with room around them, and More moves to the right end.",
+      },
+      {
+        type: "improved",
+        title: "Collapsed sidebar",
+        text: "Playlist covers are bigger when the sidebar is collapsed, so they're easier to tell apart.",
+      },
+      {
+        type: "fixed",
+        title: "Seek bar",
+        text: "The time shown while you hover over the seek bar follows the new song when it changes under the pointer.",
+      },
+    ],
+  },
+  {
     version: "0.9.0",
     date: "November 13, 2026",
     summary: "Shuffle that uses the whole playlist",
