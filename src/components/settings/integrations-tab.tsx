@@ -14,7 +14,6 @@ import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  LISTENBRAINZ_SHIPPED,
   REJECTED,
   validateToken,
 } from "@/lib/listenbrainz";
@@ -443,7 +442,7 @@ export function IntegrationsTab() {
         />
       </Group>
       <LastfmSection />
-      {LISTENBRAINZ_SHIPPED && <ListenbrainzSection />}
+      <ListenbrainzSection />
     </TabPane>
   );
 }
