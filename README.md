@@ -89,7 +89,11 @@ the first song waits for that.
 
 Try to open Radif and let macOS block it. Then go to **System Settings →
 Privacy & Security** and scroll down. There's a line about Radif being blocked,
-with an **Open Anyway** button.
+with an **Open Anyway** button. Click it. A second dialog, *"Open Radif?"*,
+has its own **Open Anyway**; click that too. macOS then asks for an
+administrator's name and password. After that Radif opens normally.
+
+The Terminal line in step 3 skips these dialogs and the password prompt.
 
 </details>
 
