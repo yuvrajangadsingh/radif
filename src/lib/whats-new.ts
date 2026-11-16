@@ -55,6 +55,23 @@ export type WhatsNewEntry = {
  */
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    version: "1.0.0",
+    date: "November 17, 2026",
+    summary: "Crossfade and gapless",
+    changes: [
+      {
+        type: "new",
+        title: "Crossfade",
+        text: "The end of each song can blend into the start of the next, for 1 to 12 seconds. Turn it on in Settings, General.",
+      },
+      {
+        type: "new",
+        title: "Gapless",
+        text: "Live albums and mixes play with no silence between songs. It's used when crossfade is off, or a song is too short to fade.",
+      },
+    ],
+  },
+  {
     version: "0.10.0",
     date: "November 15, 2026",
     summary: "Your listens on ListenBrainz",
