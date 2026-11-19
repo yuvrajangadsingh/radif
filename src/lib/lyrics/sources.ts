@@ -176,6 +176,9 @@ export function useLyricsSources(
   // has to know which providers were ever going to be asked, and reading
   // that off a second copy of the expressions would drift.
   const instrumental = isInstrumentalTitle(track?.title);
+  // A disabled query still serves what the persisted cache holds for its
+  // key, so an instrumental gets a key nothing is ever stored under.
+  const instrumentalKey = ["lyrics", "instrumental", track?.videoId];
   const askYtMusic = !!track?.videoId && enabled && !instrumental;
   const askByText = !!track && enabled && verifiable && !instrumental;
 
@@ -187,7 +190,9 @@ export function useLyricsSources(
     // v3: plain text with none of the title's words is rejected; orphan v2
     // entries that cached another song's lyrics.
     // v4: it's marked and demoted instead; orphan v3 entries cached as none.
-    queryKey: ["lyrics", "ytmusic-v4", track?.videoId, title],
+    queryKey: instrumental
+      ? instrumentalKey
+      : ["lyrics", "ytmusic-v4", track?.videoId, title],
     queryFn: () =>
       logAttempt("ytmusic", () =>
         fetchYtMusicLyrics(
@@ -222,14 +227,16 @@ export function useLyricsSources(
   // lrclib-v7: results that read as a web page's navigation are rejected
   // (plausibility.ts) — orphan v6 entries that cached such a record.
   const lrclib = useQuery({
-    queryKey: [
-      "lyrics",
-      "lrclib-v7",
-      title,
-      artistName,
-      track?.album,
-      track?.duration,
-    ],
+    queryKey: instrumental
+      ? instrumentalKey
+      : [
+          "lyrics",
+          "lrclib-v7",
+          title,
+          artistName,
+          track?.album,
+          track?.duration,
+        ],
     queryFn: () =>
       logAttempt("lrclib", () =>
         fetchLrclibLyrics(
