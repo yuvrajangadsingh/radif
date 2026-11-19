@@ -23,7 +23,7 @@ describe("checkForUpdates", () => {
   it("passes a timeout to the plugin", async () => {
     check.mockResolvedValue(null);
     await checkForUpdates({ silent: true });
-    expect(check).toHaveBeenCalledWith({ timeout: 15_000 });
+    expect(check).toHaveBeenCalledWith({ timeout: 30_000 });
   });
 
   it("a manual check during a slow startup check reports that check's answer", async () => {
