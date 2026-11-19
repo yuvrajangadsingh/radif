@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { cacheCoverToDisk } from "@/lib/cover-art";
+import { appLog } from "@/lib/app-log";
 import type { Thumbnail as YtThumbnail } from "@/lib/innertube/types";
 
 /**
@@ -127,6 +128,9 @@ export function Thumbnail({
   const [errored, setErrored] = useState(false);
   const [overrideErrored, setOverrideErrored] = useState(false);
   const [hiResLoaded, setHiResLoaded] = useState(false);
+  // URLs that failed with nothing left to fall back to. Not rendered, so
+  // the bg-muted box shows instead of WebKit's broken-image icon and alt.
+  const [dead, setDead] = useState<string[]>([]);
   // Resolved hi-res URL: either the localhost /cover URL (after the
   // Rust side has the bytes pinned to disk) or the original `upgraded`
   // URL if the resolve failed. Stays null until the resolve completes
@@ -137,6 +141,7 @@ export function Thumbnail({
     setErrored(false);
     setOverrideErrored(false);
     setHiResLoaded(false);
+    setDead([]);
   }, [lowRes, fallback, upgraded, overrideHighRes]);
 
   // Resolve `upgraded` through the disk cache. After the first session
@@ -160,21 +165,28 @@ export function Thumbnail({
   // On error at any tier we drop to the next. The blur-up low-res
   // layer (the API's smallest variant) is always shown beneath while
   // a hi-res target loads.
+  // A URL that failed to load is skipped in every tier (two tiers can share
+  // one); when all are dead, `live` hides the image.
   const target =
-    overrideHighRes && !overrideErrored
-      ? overrideHighRes
-      : resolvedUpgraded && !errored
-        ? resolvedUpgraded
-        : fallback;
+    [
+      overrideHighRes && !overrideErrored ? overrideHighRes : null,
+      resolvedUpgraded && !errored ? resolvedUpgraded : null,
+    ].find((u) => u && !dead.includes(u)) ?? fallback;
+  const markDead = (url: string) => {
+    if (dead.includes(url)) return;
+    appLog(`[cover] failed to load ${url}`);
+    setDead((d) => [...d, url]);
+  };
+  const live = (url: string | null) => !!url && !dead.includes(url);
   const showLayered = !!(target && lowRes && target !== lowRes);
 
-  // Make Chromium's error path and WebKitGTK's placeholder path fall
-  // through to the same next image in the chain.
+  // WebKitGTK's placeholder path: drop every tier showing this URL. The
+  // last tier stays, since a small image there may be valid art.
   const demoteTarget = () => {
-    if (target === fallback) return;
     if (target === overrideHighRes) setOverrideErrored(true);
-    else if (target === resolvedUpgraded) setErrored(true);
+    if (target === resolvedUpgraded) setErrored(true);
   };
+  const onTargetError = () => markDead(target!);
 
   const sharedImgProps = {
     loading: "lazy",
@@ -202,37 +214,42 @@ export function Thumbnail({
           {/* Static low-res placeholder — no blur, no scale, no
               transition. Sits underneath the hi-res image and stays
               put while the hi-res cross-fades in on top. */}
-          <img
-            {...sharedImgProps}
-            src={lowRes!}
-            alt=""
-            aria-hidden="true"
-            className="absolute inset-0 size-full object-cover"
-          />
-          <img
-            {...sharedImgProps}
-            src={target!}
-            alt={alt}
-            onLoad={(e) => {
-              if (isYtPlaceholder(e.currentTarget)) demoteTarget();
-              else setHiResLoaded(true);
-            }}
-            onError={demoteTarget}
-            className={cn(
-              "absolute inset-0 size-full object-cover transition-opacity duration-200",
-              hiResLoaded ? "opacity-100" : "opacity-0",
-            )}
-          />
+          {live(lowRes) && (
+            <img
+              {...sharedImgProps}
+              src={lowRes!}
+              alt=""
+              aria-hidden="true"
+              onError={() => markDead(lowRes!)}
+              className="absolute inset-0 size-full object-cover"
+            />
+          )}
+          {live(target) && (
+            <img
+              {...sharedImgProps}
+              src={target!}
+              alt={alt}
+              onLoad={(e) => {
+                if (isYtPlaceholder(e.currentTarget)) demoteTarget();
+                else setHiResLoaded(true);
+              }}
+              onError={onTargetError}
+              className={cn(
+                "absolute inset-0 size-full object-cover transition-opacity duration-200",
+                hiResLoaded ? "opacity-100" : "opacity-0",
+              )}
+            />
+          )}
         </>
-      ) : target ? (
+      ) : live(target) ? (
         <img
           {...sharedImgProps}
-          src={target}
+          src={target!}
           alt={alt}
           onLoad={(e) => {
             if (isYtPlaceholder(e.currentTarget)) demoteTarget();
           }}
-          onError={demoteTarget}
+          onError={onTargetError}
           className="size-full object-cover"
         />
       ) : null}
