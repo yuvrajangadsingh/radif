@@ -1504,6 +1504,11 @@ async fn cleanup_login_artifacts(app: &tauri::AppHandle) {
     }
 }
 
+/// Where the login window starts, and what it and the keeper replay to have
+/// Google bridge a live google.com session into new .youtube.com cookies.
+const SERVICE_LOGIN_URL: &str =
+    "https://accounts.google.com/ServiceLogin?service=youtube&continue=https%3A%2F%2Fmusic.youtube.com%2F";
+
 /// Open an in-app Google sign-in window in an isolated WebView profile
 /// and add the resulting cookies as a new account. Polls the (fresh)
 /// webview cookie store until YouTube auth cookies appear, encrypts
@@ -1536,6 +1541,11 @@ async fn start_login(app: tauri::AppHandle) -> Result<(), String> {
         let _ = existing.set_focus();
         return Ok(());
     }
+    // Held until the window exists: a keeper refresh in flight may be
+    // replaying ServiceLogin into the cookie store this window shares, and
+    // one that starts later sees the window and skips the replay.
+    let refresh_guard = app.state::<RefreshGuard>();
+    let _refresh = refresh_guard.inner().0.lock().await;
 
     // Per-attempt account id, minted up front so the WebView profile can
     // live at its permanent home from the first keystroke. Still fresh
@@ -1555,9 +1565,6 @@ async fn start_login(app: tauri::AppHandle) -> Result<(), String> {
     // on success.
     let account_dir = accounts_dir(&app).join(&account_id);
 
-    // Hoisted so the case-(2) nudge below can replay the exact same URL.
-    const SERVICE_LOGIN_URL: &str =
-        "https://accounts.google.com/ServiceLogin?service=youtube&continue=https%3A%2F%2Fmusic.youtube.com%2F";
     let url = SERVICE_LOGIN_URL
         .parse::<tauri::Url>()
         .map_err(|e| e.to_string())?;
@@ -1639,27 +1646,18 @@ async fn start_login(app: tauri::AppHandle) -> Result<(), String> {
                 // auto-sign-in, which upstream measured completing only
                 // about half the time and otherwise leaving the user on
                 // a bare page with no way forward.
-                if !nudged_to_yt {
-                    let has_google_auth = cookies.iter().any(|c| {
-                        let name = c.name();
-                        (name == "SAPISID" || name == "SID" || name == "__Secure-1PSID")
-                            && c.domain()
-                                .map(|d| d.trim_start_matches('.').ends_with("google.com"))
-                                .unwrap_or(false)
-                    });
-                    if has_google_auth {
-                        if let Ok(url) = SERVICE_LOGIN_URL.parse::<tauri::Url>() {
-                            match win.navigate(url) {
-                                Ok(()) => eprintln!(
-                                    "[login] google-auth detected without YT cookies; replayed ServiceLogin so Google bridges the youtube.com cookies"
-                                ),
-                                Err(e) => eprintln!(
-                                    "[login] failed to redirect to YT: {e}"
-                                ),
-                            }
+                if !nudged_to_yt && session::google_session_live(&netscape, now_ts()) {
+                    if let Ok(url) = SERVICE_LOGIN_URL.parse::<tauri::Url>() {
+                        match win.navigate(url) {
+                            Ok(()) => eprintln!(
+                                "[login] google-auth detected without YT cookies; replayed ServiceLogin so Google bridges the youtube.com cookies"
+                            ),
+                            Err(e) => eprintln!(
+                                "[login] failed to redirect to YT: {e}"
+                            ),
                         }
-                        nudged_to_yt = true;
                     }
+                    nudged_to_yt = true;
                 }
                 continue;
             }
@@ -1807,6 +1805,9 @@ static KEEPER_PAGE_LOADS: AtomicU64 = AtomicU64::new(0);
 /// not carry the navigation they belong to.
 static KEEPER_ACTIVITY: AtomicU64 = AtomicU64::new(0);
 
+/// A failed re-bridge is logged once per streak, see `refresh_account_cookies`.
+static REBRIDGE_FAILED_LOGGED: AtomicBool = AtomicBool::new(false);
+
 /// The keeper build in force: bumped before each build and carried by
 /// that build's page-load callbacks, so a callback from a keeper since
 /// replaced can be told apart and retired.
@@ -1826,6 +1827,19 @@ static KEEPER_COMMITTED_GEN: AtomicU64 = AtomicU64::new(0);
 /// cookie store survives the park, so it may also still capture) and
 /// retries on the next.
 const KEEPER_PARK_AFTER: Duration = Duration::from_secs(45);
+
+/// Counted, navigated and armed in one main-thread step: a park deciding on
+/// the activity count cannot slip in between, and a navigate that never
+/// reports back still ends in a park.
+fn navigate_keeper(win: &tauri::WebviewWindow, url: &str) {
+    let Ok(u) = url.parse::<tauri::Url>() else { return };
+    let page = win.clone();
+    let _ = win.run_on_main_thread(move || {
+        KEEPER_ACTIVITY.fetch_add(1, Ordering::Relaxed);
+        let _ = page.navigate(u);
+        arm_keeper_park(page);
+    });
+}
 
 /// Ask the keeper to blank its page `KEEPER_PARK_AFTER` from now unless
 /// something else happens to it first, see `KEEPER_ACTIVITY`. Main thread
@@ -2041,17 +2055,7 @@ async fn refresh_account_cookies(app: &tauri::AppHandle, id: &str) -> RefreshOut
     // A reused keeper is reloaded to force fresh authenticated traffic; a
     // just-created one is already loading the URL from the builder.
     if !created {
-        if let Ok(u) = "https://music.youtube.com/".parse::<tauri::Url>() {
-            // Counted, navigated and armed in one main-thread step: a park
-            // deciding on the activity count cannot slip in between, and a
-            // navigate that never reports back still ends in a park.
-            let page = win.clone();
-            let _ = win.run_on_main_thread(move || {
-                KEEPER_ACTIVITY.fetch_add(1, Ordering::Relaxed);
-                let _ = page.navigate(u);
-                arm_keeper_park(page);
-            });
-        }
+        navigate_keeper(&win, "https://music.youtube.com/");
     }
 
     // Poll the keeper's cookie store until the full authed set is present
@@ -2059,13 +2063,45 @@ async fn refresh_account_cookies(app: &tauri::AppHandle, id: &str) -> RefreshOut
     // the same predicate `is_logged_in` uses, so a snapshot can never be
     // captured, committed, and then reported as signed out.
     let mut captured: Option<String> = None;
-    for tick in 0..12u8 {
+    let mut bridged = false;
+    for tick in 0..24u8 {
+        // Twelve ticks for a reload, twelve more once ServiceLogin has been
+        // replayed, for Google's redirect chain.
+        if tick == 12 && !bridged {
+            break;
+        }
         tokio::time::sleep(Duration::from_millis(1500)).await;
         let Ok(cookies) = win.cookies() else { continue };
         let netscape = cookies_to_netscape(&cookies);
+        // The .youtube.com session expires a week after sign-in and a reload
+        // never renews it. With Google's session still live, the login
+        // window's replay bridges a new one; do the same before it lapses.
+        if session::needs_rebridge(&netscape, now_ts()) {
+            // Not while a sign-in window is open: it shares this cookie
+            // store, and the replay could swap its account back. `start_login`
+            // holds `RefreshGuard` until its window exists.
+            if !bridged && app.get_webview_window("login").is_none() {
+                bridged = true;
+                navigate_keeper(&win, SERVICE_LOGIN_URL);
+                eprintln!(
+                    "[refresh] {id}: youtube.com session gone or expiring within a day; replayed ServiceLogin"
+                );
+                continue;
+            }
+            // Wait for the bridge. On the last tick, fall through: a jar
+            // that still signs for a few more hours beats no refresh at all.
+            if bridged && tick < 23 {
+                continue;
+            }
+        }
         let creds = jar_credentials(&netscape);
         if !creds.identity {
             continue; // the keeper hasn't loaded a session yet
+        }
+        // After a replay, never commit what can't sign: the jar on disk is
+        // usually already dead, so the continuity check would let it through.
+        if bridged && !creds.signable() {
+            continue;
         }
         // Give the handshake a few ticks to finish, then take what we have:
         // the continuity check below decides whether it is good enough to
@@ -2076,6 +2112,28 @@ async fn refresh_account_cookies(app: &tauri::AppHandle, id: &str) -> RefreshOut
         }
         captured = Some(netscape);
         break;
+    }
+    if captured.as_deref().is_some_and(|s| session::youtube_session_fresh(s, now_ts())) {
+        if bridged {
+            eprintln!("[refresh] {id}: ServiceLogin brought back the youtube.com session");
+        }
+        REBRIDGE_FAILED_LOGGED.store(false, Ordering::Relaxed);
+    } else if bridged {
+        // Stop the redirect chain before `RefreshGuard` lets a sign-in window
+        // open on the same cookie store.
+        navigate_keeper(&win, "about:blank");
+        if !REBRIDGE_FAILED_LOGGED.swap(true, Ordering::Relaxed) {
+            eprintln!(
+                "[refresh] {id}: ServiceLogin did not bring back the youtube.com session \
+                 (Google may want a sign-in); not logged again until it does"
+            );
+        }
+        // Nothing else re-asks while the app sits open, so a window that last
+        // saw a live session would keep showing it after the jar expired. A
+        // capture that still signs is committed and announced by the caller.
+        if captured.is_none() {
+            let _ = app.emit("session-refreshed", id);
+        }
     }
     let Some(snapshot) = captured else {
         return RefreshOutcome::Failed("no auth cookies after reload (profile logged out?)".into());
@@ -2404,10 +2462,11 @@ async fn run_refresh_loop(app: tauri::AppHandle) {
                                 eprintln!("[refresh] desktop session is available again");
                             }
                             eprintln!("[refresh] renewed snapshot for {active}");
-                            // Emitted only on a committed jar, never on an
-                            // attempt: the frontend uses it to re-ask an auth
-                            // question it may have answered wrongly while the
-                            // session was unreadable.
+                            // Emitted on a committed jar, never on an ordinary
+                            // attempt (a failed re-bridge sends it too):
+                            // the frontend uses it to re-ask an auth question
+                            // it may have answered wrongly while the session
+                            // was unreadable.
                             let _ = app.emit("session-refreshed", &active);
                         }
                         // Nothing was written and nothing was learned: the
