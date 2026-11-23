@@ -146,8 +146,9 @@ export function useLoginSuccessListener(): void {
  * because nothing re-asks. Dropping the cached auth context and
  * invalidating the three auth queries turns a restart into a re-render.
  *
- * Only committed successes are announced, so this never fires on a
- * failed refresh.
+ * Announced on committed successes, and when a ServiceLogin replay fails
+ * to bring the YouTube session back, so an expired jar under an open app
+ * is re-asked.
  */
 export function useSessionRefreshedListener(): void {
   const qc = useQueryClient();
