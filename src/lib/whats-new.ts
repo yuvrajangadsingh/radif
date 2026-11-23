@@ -55,6 +55,18 @@ export type WhatsNewEntry = {
  */
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    version: "1.0.1",
+    date: "November 23, 2026",
+    summary: "Stay signed in",
+    changes: [
+      {
+        type: "fixed",
+        title: "Sign-in",
+        text: "Radif no longer signs you out after a week.",
+      },
+    ],
+  },
+  {
     version: "1.0.0",
     date: "November 17, 2026",
     summary: "Crossfade and gapless",
