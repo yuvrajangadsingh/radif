@@ -196,6 +196,35 @@ pub fn inspect_jar(jar: &str, host: &str, path: &str, now: i64) -> Credentials {
     out
 }
 
+/// Google account cookies that prove a ServiceLogin replay can bridge a new
+/// YouTube session without a sign-in.
+const GOOGLE_SESSION_COOKIES: [&str; 3] = ["SAPISID", "SID", "__Secure-1PSID"];
+
+/// How long before the YouTube session cookies expire the keeper re-bridges.
+pub const REBRIDGE_MARGIN_SECS: i64 = 24 * 60 * 60;
+
+/// A live Google account session on google.com.
+pub fn google_session_live(jar: &str, now: i64) -> bool {
+    parse_jar(jar).any(|c| {
+        GOOGLE_SESSION_COOKIES.contains(&c.name)
+            && !c.value.is_empty()
+            && !c.is_expired(now)
+            && (c.domain == "google.com" || c.domain.ends_with(".google.com"))
+    })
+}
+
+/// The YouTube session can still sign a request a day from now.
+pub fn youtube_session_fresh(jar: &str, now: i64) -> bool {
+    inspect_jar(jar, "music.youtube.com", INNERTUBE_PATH, now + REBRIDGE_MARGIN_SECS).signable()
+}
+
+/// Should the keeper replay ServiceLogin? The .youtube.com session cookies
+/// are stamped to expire 7 days after sign-in and a reload never renews
+/// them, while the google.com ones last a year (M5 store, Nov 2026).
+pub fn needs_rebridge(jar: &str, now: i64) -> bool {
+    google_session_live(jar, now) && !youtube_session_fresh(jar, now)
+}
+
 /// Did anything about the cookie set change?
 ///
 /// Evidence that a keeper reload actually reached Google, which nothing
@@ -626,6 +655,30 @@ mod tests {
             "sign-me",
         ));
         jar
+    }
+
+    #[test]
+    fn rebridges_when_youtube_lapses_under_a_live_google_session() {
+        let google = line(".google.com", "/", NOW + 365 * 86_400, "SAPISID", "g");
+        let yt = |expiry| line(".youtube.com", "/", expiry, "__Secure-3PAPISID", "y");
+        // The M5 case: Google's cookies live, YouTube's gone.
+        assert!(needs_rebridge(&google, NOW));
+        // Expiring within the day, or already expired.
+        assert!(needs_rebridge(&(google.clone() + &yt(NOW + 3_600)), NOW));
+        assert!(needs_rebridge(&(google.clone() + &yt(NOW - 1)), NOW));
+        // Days left, or a session cookie with no expiry.
+        assert!(!needs_rebridge(&(google.clone() + &yt(NOW + 6 * 86_400)), NOW));
+        assert!(!needs_rebridge(&(google.clone() + &yt(0)), NOW));
+        // Nothing to bridge from: no Google session, an expired one, or an
+        // empty value.
+        assert!(!needs_rebridge(&yt(NOW + 3_600), NOW));
+        assert!(!needs_rebridge(&line(".google.com", "/", NOW - 1, "SID", "g"), NOW));
+        assert!(!needs_rebridge(&line(".google.com", "/", 0, "SID", ""), NOW));
+        // A signing-cookie name on youtube.com is not a Google session.
+        assert!(!google_session_live(&yt(NOW + 3_600), NOW));
+        // What counts as brought back: a day or more left, Google or not.
+        assert!(youtube_session_fresh(&yt(NOW + 6 * 86_400), NOW));
+        assert!(!youtube_session_fresh(&yt(NOW + 3_600), NOW));
     }
 
     #[test]
