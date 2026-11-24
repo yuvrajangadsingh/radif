@@ -1,6 +1,6 @@
 [package]
 name = "ytubic"
-version = "1.0.1"
+version = "1.0.2"
 description = "Radif — fast, responsive YouTube Music desktop client"
 authors = ["Yuvraj Angad Singh"]
 license = "GPL-3.0-only"

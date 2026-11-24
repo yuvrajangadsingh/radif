@@ -98,6 +98,18 @@ function logAttempt(
 
 const NONE_SKIPPED: LyricsSource[] = [];
 
+/**
+ * A title that says it is the instrumental. YouTube Music attaches the
+ * vocal song's lyrics to some of these by videoId (his Champakali
+ * (Instrumental Version), Nov 16), so no source is asked. Karaoke and
+ * "with lyrics" uploads keep theirs: their words are the point.
+ */
+export function isInstrumentalTitle(title: string | undefined): boolean {
+  return (
+    !!title && /\binstrumental\b/i.test(title) && !/karaoke|lyric/i.test(title)
+  );
+}
+
 /** The auto pick: timed beats plain, then `SOURCE_ORDER`, passing over
  *  the sources the listener skipped for this track. Plain text that may be
  *  another song's comes last, and only once every other source has
@@ -163,8 +175,12 @@ export function useLyricsSources(
   // The two enablement conditions, named once: the settled check below
   // has to know which providers were ever going to be asked, and reading
   // that off a second copy of the expressions would drift.
-  const askYtMusic = !!track?.videoId && enabled;
-  const askByText = !!track && enabled && verifiable;
+  const instrumental = isInstrumentalTitle(track?.title);
+  // A disabled query still serves what the persisted cache holds for its
+  // key, so an instrumental gets a key nothing is ever stored under.
+  const instrumentalKey = ["lyrics", "instrumental", track?.videoId];
+  const askYtMusic = !!track?.videoId && enabled && !instrumental;
+  const askByText = !!track && enabled && verifiable && !instrumental;
 
   // Looked up by the videoId alone; the title only checks plain text that
   // shares none of its words (maybe another song's lyrics on the video).
@@ -174,7 +190,9 @@ export function useLyricsSources(
     // v3: plain text with none of the title's words is rejected; orphan v2
     // entries that cached another song's lyrics.
     // v4: it's marked and demoted instead; orphan v3 entries cached as none.
-    queryKey: ["lyrics", "ytmusic-v4", track?.videoId, title],
+    queryKey: instrumental
+      ? instrumentalKey
+      : ["lyrics", "ytmusic-v4", track?.videoId, title],
     queryFn: () =>
       logAttempt("ytmusic", () =>
         fetchYtMusicLyrics(
@@ -209,14 +227,16 @@ export function useLyricsSources(
   // lrclib-v7: results that read as a web page's navigation are rejected
   // (plausibility.ts) — orphan v6 entries that cached such a record.
   const lrclib = useQuery({
-    queryKey: [
-      "lyrics",
-      "lrclib-v7",
-      title,
-      artistName,
-      track?.album,
-      track?.duration,
-    ],
+    queryKey: instrumental
+      ? instrumentalKey
+      : [
+          "lyrics",
+          "lrclib-v7",
+          title,
+          artistName,
+          track?.album,
+          track?.duration,
+        ],
     queryFn: () =>
       logAttempt("lrclib", () =>
         fetchLrclibLyrics(

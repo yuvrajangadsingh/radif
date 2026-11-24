@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@tauri-apps/plugin-http", () => ({ fetch: vi.fn() }));
 
-import { pickBest, type LyricsSource } from "./sources";
+import { isInstrumentalTitle, pickBest, type LyricsSource } from "./sources";
 import { useLyricsSkip } from "./skip";
 import type { Lyrics } from "./types";
 
@@ -90,5 +90,17 @@ describe("useLyricsSkip", () => {
     ]);
     useLyricsSkip.getState().reset("v204");
     expect(useLyricsSkip.getState().byVideo.v204).toBeUndefined();
+  });
+});
+
+describe("isInstrumentalTitle", () => {
+  it("matches an instrumental title, not karaoke or a vocal one", () => {
+    expect(isInstrumentalTitle("Champakali (Instrumental Version)")).toBe(true);
+    expect(isInstrumentalTitle("Song - Instrumental")).toBe(true);
+    expect(isInstrumentalTitle("Song (Karaoke Instrumental)")).toBe(false);
+    expect(isInstrumentalTitle("Song (Instrumental with Lyrics)")).toBe(false);
+    expect(isInstrumentalTitle("Instrumentals of Love")).toBe(false);
+    expect(isInstrumentalTitle("Champakali")).toBe(false);
+    expect(isInstrumentalTitle(undefined)).toBe(false);
   });
 });

@@ -1,5 +1,6 @@
 import { useEffect } from "react";
-import { check, type Update } from "@tauri-apps/plugin-updater";
+import { invoke } from "@tauri-apps/api/core";
+import { Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { toast } from "sonner";
 import { useUpdateStore } from "@/lib/store/update";
@@ -14,8 +15,10 @@ let busy = false;
 // A connection to GitHub can stall for 75 s (macOS's connect timeout)
 // before it fails, and the plugin has no timeout of its own. That likely
 // held QA round 36's startup check, while the manual check behind it
-// returned silently, so the offer came 2 minutes late.
-const CHECK_TIMEOUT_MS = 15_000;
+// returned silently, so the offer came 2 minutes late. 15 s was too
+// short: in QA round 45 every check failed at the cap while the asset host
+// took 12 to 15 s to connect.
+const CHECK_TIMEOUT_MS = 30_000;
 let checking: Promise<Update | null> | null = null;
 
 /** One check at a time; a second caller waits for the same answer. */
@@ -27,7 +30,12 @@ function runCheck(kind: string): Promise<Update | null> {
   const t0 = performance.now();
   const took = () => `${Math.round(performance.now() - t0)}ms`;
   appLog(`[updater] ${kind} check started`);
-  checking = check({ timeout: CHECK_TIMEOUT_MS })
+  // Our command, not the plugin's check: it adds a connect timeout.
+  checking = invoke<ConstructorParameters<typeof Update>[0] | null>(
+    "check_for_update",
+    { timeoutMs: CHECK_TIMEOUT_MS },
+  )
+    .then((meta) => (meta ? new Update(meta) : null))
     .then(
       (update) => {
         appLog(
