@@ -4414,6 +4414,47 @@ fn frontend_log(line: String) {
     eprintln!("[web] {}", line.chars().take(400).collect::<String>());
 }
 
+/// How long an update request may spend connecting. The plugin sets no
+/// connect timeout, so a dead address in a host's DNS answer (one of
+/// release-assets.githubusercontent.com's four, Nov 23) held the connect
+/// until the check's whole timeout ran out. reqwest splits this evenly
+/// across the addresses, so a dead first one of four costs 2 s.
+const UPDATE_CONNECT_TIMEOUT: Duration = Duration::from_secs(8);
+
+/// The plugin's `check` command with UPDATE_CONNECT_TIMEOUT added. Returns
+/// what the JS `Update` class is built from; the update goes in the
+/// webview's resource table, where the plugin's download and install
+/// commands find it, and its download keeps the connect timeout.
+#[tauri::command]
+async fn check_for_update(
+    webview: tauri::Webview,
+    timeout_ms: u64,
+) -> Result<Option<serde_json::Value>, String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let update = webview
+        .updater_builder()
+        .timeout(Duration::from_millis(timeout_ms))
+        .configure_client(|b| b.connect_timeout(UPDATE_CONNECT_TIMEOUT))
+        .build()
+        .map_err(|e| e.to_string())?
+        .check()
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(update.map(|u| {
+        let date = u
+            .date
+            .and_then(|d| d.format(&time::format_description::well_known::Rfc3339).ok());
+        serde_json::json!({
+            "currentVersion": u.current_version.clone(),
+            "version": u.version.clone(),
+            "date": date,
+            "body": u.body.clone(),
+            "rawJson": u.raw_json.clone(),
+            "rid": webview.resources_table().add(u),
+        })
+    }))
+}
+
 #[derive(Default)]
 struct StreamServerState {
     port: Arc<Mutex<Option<u16>>>,
@@ -5575,6 +5616,7 @@ pub fn run() {
         // never casts costs nothing.
         .manage(cast::CastState::default())
         .invoke_handler(tauri::generate_handler![
+            check_for_update,
             ensure_ytdlp,
             resolve_stream_ytdlp,
             resolve_hls_stream,

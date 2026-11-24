@@ -1,5 +1,6 @@
 import { useEffect } from "react";
-import { check, type Update } from "@tauri-apps/plugin-updater";
+import { invoke } from "@tauri-apps/api/core";
+import { Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { toast } from "sonner";
 import { useUpdateStore } from "@/lib/store/update";
@@ -29,7 +30,12 @@ function runCheck(kind: string): Promise<Update | null> {
   const t0 = performance.now();
   const took = () => `${Math.round(performance.now() - t0)}ms`;
   appLog(`[updater] ${kind} check started`);
-  checking = check({ timeout: CHECK_TIMEOUT_MS })
+  // Our command, not the plugin's check: it adds a connect timeout.
+  checking = invoke<ConstructorParameters<typeof Update>[0] | null>(
+    "check_for_update",
+    { timeoutMs: CHECK_TIMEOUT_MS },
+  )
+    .then((meta) => (meta ? new Update(meta) : null))
     .then(
       (update) => {
         appLog(
