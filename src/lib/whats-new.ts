@@ -55,6 +55,28 @@ export type WhatsNewEntry = {
  */
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    version: "1.0.2",
+    date: "November 25, 2026",
+    summary: "Covers, lyrics and updates",
+    changes: [
+      {
+        type: "fixed",
+        title: "Covers",
+        text: "A cover that can't load shows a plain grey box, not a broken image.",
+      },
+      {
+        type: "fixed",
+        title: "Lyrics",
+        text: "Songs titled Instrumental no longer show the sung version's lyrics.",
+      },
+      {
+        type: "fixed",
+        title: "Updates",
+        text: "The update check no longer gives up on a slow connection.",
+      },
+    ],
+  },
+  {
     version: "1.0.1",
     date: "November 23, 2026",
     summary: "Stay signed in",
